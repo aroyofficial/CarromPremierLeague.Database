@@ -1,0 +1,12 @@
+{
+	"tables": {
+		"tblSeasons": {
+			"tables": []
+		},
+		"tblTeams": {
+			"tables": []
+		}
+	},
+	"functions": {},
+	"procedures": {}
+}
