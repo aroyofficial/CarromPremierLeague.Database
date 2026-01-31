@@ -1,18 +1,9 @@
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.tables
-    WHERE name = 'tblTeams'
-    AND schema_id = SCHEMA_ID('dbo')
-)
-BEGIN
-    CREATE TABLE [dbo].[tblTeams]
-    (
-        [Id]        BIGINT        NOT NULL IDENTITY(1,1),
-        [CreatedAt] DATETIME2(7)  NOT NULL CONSTRAINT [DF_tblTeams_CreatedAt] DEFAULT (SYSUTCDATETIME()),
-        [UpdatedAt] DATETIME2(7)  NOT NULL CONSTRAINT [DF_tblTeams_UpdatedAt] DEFAULT (SYSUTCDATETIME()),
-        [Void]      BIT           NOT NULL CONSTRAINT [DF_tblTeams_Void] DEFAULT (0),
+CREATE TABLE IF NOT EXISTS tblTeams (
+    Id BIGINT NOT NULL AUTO_INCREMENT,
+    CreatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+    UpdatedAt DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6)
+    ON UPDATE CURRENT_TIMESTAMP(6),
+    Void BOOLEAN NOT NULL DEFAULT FALSE,
 
-        CONSTRAINT [PK_tblTeams] PRIMARY KEY CLUSTERED ([Id] ASC)
-    );
-END
-GO
+    CONSTRAINT PK_tblTeams PRIMARY KEY (Id)
+);

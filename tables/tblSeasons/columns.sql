@@ -1,27 +1,72 @@
-IF COL_LENGTH('dbo.tblSeasons', 'Name') IS NULL
-BEGIN
-    ALTER TABLE [dbo].[tblSeasons]
-    ADD [Name] NVARCHAR(255) NOT NULL;
-END
-GO
+SET @tableName = 'tblSeasons';
 
-IF COL_LENGTH('dbo.tblSeasons', 'StartDate') IS NULL
-BEGIN
-    ALTER TABLE [dbo].[tblSeasons]
-    ADD [StartDate] DATE;
-END
-GO
+-- Name column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblSeasons ADD COLUMN Name VARCHAR(255) NOT NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'Name'
+);
 
-IF COL_LENGTH('dbo.tblSeasons', 'EndDate') IS NULL
-BEGIN
-    ALTER TABLE [dbo].[tblSeasons]
-    ADD [EndDate] DATE;
-END
-GO
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
-IF COL_LENGTH('dbo.tblSeasons', 'LogoUrl') IS NULL
-BEGIN
-    ALTER TABLE [dbo].[tblSeasons]
-    ADD [LogoUrl] NVARCHAR(2048);
-END
-GO
+
+-- StartDate column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblSeasons ADD COLUMN StartDate DATE;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'StartDate'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- EndDate column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblSeasons ADD COLUMN EndDate DATE;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'EndDate'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+
+-- LogoUrl column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblSeasons ADD COLUMN LogoUrl VARCHAR(2048);',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'LogoUrl'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

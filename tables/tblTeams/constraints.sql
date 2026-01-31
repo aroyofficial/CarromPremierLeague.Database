@@ -1,13 +1,16 @@
-IF NOT EXISTS (
-    SELECT 1
-    FROM sys.key_constraints
-    WHERE type = 'PK'
-    AND parent_object_id = OBJECT_ID('dbo.tblSeasons')
-    AND name = 'PK_tblSeasons'
-)
-BEGIN
-    ALTER TABLE [dbo].[tblSeasons]
-    ADD CONSTRAINT [PK_tblSeasons]
-        PRIMARY KEY CLUSTERED ([Id] ASC);
-END
-GO
+SET @pk_exists = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'tblSeasons'
+      AND CONSTRAINT_TYPE = 'PRIMARY KEY'
+);
+
+SET @sql = IF(@pk_exists = 0,
+    'ALTER TABLE tblSeasons ADD CONSTRAINT PK_tblSeasons PRIMARY KEY (Id);',
+    'DO 0;'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

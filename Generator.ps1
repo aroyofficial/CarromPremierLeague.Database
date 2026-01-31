@@ -1,3 +1,6 @@
+param (
+    [string]$db
+)
 
 # Get the directory where the script is located
 $scriptDir = $PSScriptRoot
@@ -13,6 +16,20 @@ $outputFile = Join-Path $scriptDir ".out.sql"
 if (Test-Path $outputFile) {
     Clear-Content $outputFile
 }
+
+# Add database creation and usage statement if -db parameter is provided
+if (-not [string]::IsNullOrEmpty($db)) {
+    $dbCreationStatement = @"
+CREATE DATABASE IF NOT EXISTS ``$db``;
+USE ``$db``;
+"@
+    Add-Content -Path $outputFile -Value $dbCreationStatement
+}
+
+$setUtcTimezoneStatement = @"
+SET time_zone = '+00:00';
+"@
+Add-Content -Path $outputFile -Value $setUtcTimezoneStatement
 
 # --- Topological Sort ---
 
@@ -118,4 +135,3 @@ foreach ($itemName in $sortedList) {
 }
 
 Write-Host "Successfully created merged SQL file at: $outputFile"
-
