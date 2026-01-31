@@ -1,5 +1,11 @@
 {
 	"tables": {
+		"tblCountries": {
+			"tables": []
+		},
+		"tblPlayers": {
+			"tables": []
+		},
 		"tblSeasons": {
 			"tables": []
 		},
