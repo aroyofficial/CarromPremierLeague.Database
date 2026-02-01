@@ -1,0 +1,109 @@
+Project CarromPremierLeague {
+  database_type: 'MySQL'
+  Note: 'Carrom Premier League Database'
+}
+
+Table tblCountries {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  Name VARCHAR(255) [not null]
+  IsoCode2 VARCHAR(2) [not null]
+  IsoCode3 VARCHAR(3) [not null]
+  Capital VARCHAR(255)
+  PhoneCode VARCHAR(20)
+  Continent VARCHAR(255)
+}
+
+Table tblSeasons {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  Name VARCHAR(255) [not null]
+  StartDate DATE
+  EndDate DATE
+  LogoUrl VARCHAR(2048)
+}
+
+Table tblTeams {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  Name VARCHAR(255) [not null]
+  Slogan VARCHAR(500)
+  LogoUrl VARCHAR(2048)
+}
+
+Table tblPlayers {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  FirstName VARCHAR(255) [not null]
+  LastName VARCHAR(255) [not null]
+  DateOfBirth DATE
+  AvatarUrl VARCHAR(2048)
+  NationalityId BIGINT
+}
+
+Table tblPlayersSeasonsTeams {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  PlayerId BIGINT [not null]
+  SeasonId BIGINT [not null]
+  TeamId BIGINT [not null]
+  indexes {
+    (PlayerId, SeasonId) [unique]
+  }
+}
+
+Table tblMatches {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  Team1 BIGINT [not null]
+  Team2 BIGINT [not null]
+  ScheduledDate DATE [not null]
+  Duration INT
+  Extra INT
+  GoldenStrike BIT [not null, default: 0]
+  Category TINYINT [not null]
+  Status TINYINT [not null, default: 1]
+  "Order" TINYINT [not null]
+  SeasonId BIGINT [not null]
+  NetPoints TINYINT
+  Points TINYINT [not null, default: 0]
+  Outcome TINYINT
+}
+
+Table tblMatchStats {
+  Id BIGINT [pk, increment]
+  CreatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  UpdatedAt DATETIME(6) [not null, default: `CURRENT_TIMESTAMP(6)`]
+  Void BOOLEAN [not null, default: false]
+  MatchId BIGINT [not null]
+  PlayerId BIGINT [not null]
+  CoinsPocketed TINYINT
+  StrikersPocketed TINYINT
+  CoinsFined TINYINT
+  ShotsTaken TINYINT
+  indexes {
+    (MatchId, PlayerId) [unique]
+  }
+}
+
+Ref: tblPlayers.NationalityId > tblCountries.Id
+Ref: tblPlayersSeasonsTeams.PlayerId > tblPlayers.Id
+Ref: tblPlayersSeasonsTeams.SeasonId > tblSeasons.Id
+Ref: tblPlayersSeasonsTeams.TeamId > tblTeams.Id
+Ref: tblMatches.Team1 > tblTeams.Id
+Ref: tblMatches.Team2 > tblTeams.Id
+Ref: tblMatches.SeasonId > tblSeasons.Id
+Ref: tblMatchStats.MatchId > tblMatches.Id
+Ref: tblMatchStats.PlayerId > tblPlayers.Id

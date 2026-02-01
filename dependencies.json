@@ -4,13 +4,34 @@
 			"tables": []
 		},
 		"tblPlayers": {
-			"tables": []
+			"tables": [
+				"tblCountries"
+			]
 		},
 		"tblSeasons": {
 			"tables": []
 		},
 		"tblTeams": {
 			"tables": []
+		},
+		"tblPlayersSeasonsTeams": {
+			"tables": [
+				"tblPlayers",
+				"tblSeasons",
+				"tblTeams"
+			]
+		},
+		"tblMatches": {
+			"tables": [
+				"tblTeams",
+				"tblSeasons"
+			]
+		},
+		"tblMatchStats": {
+			"tables": [
+				"tblMatches",
+				"tblPlayers"
+			]
 		}
 	},
 	"functions": {},
