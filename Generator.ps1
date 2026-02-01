@@ -115,21 +115,34 @@ $fileOrder = @(
     "data.sql"
 )
 
+Start-Sleep -Seconds 1
+
 foreach ($itemName in $sortedList) {
     $itemType = $allItems[$itemName]
-    $itemPath = Join-Path -Path $scriptDir -ChildPath "$itemType\$itemName"
+    
+    Add-Content -Path $outputFile -Value "-- Merging files for ${itemType}: ${itemName}"
 
-    if (Test-Path $itemPath) {
-        Add-Content -Path $outputFile -Value "-- Merging files for ${itemType}: ${itemName}"
-        
-        foreach ($file in $fileOrder) {
-            $sqlFilePath = Join-Path $itemPath $file
-            if (Test-Path $sqlFilePath) {
-                Write-Host "Adding content of $sqlFilePath"
-                $content = Get-Content $sqlFilePath -Raw
-                Add-Content -Path $outputFile -Value $content
-                Add-Content -Path $outputFile -Value "" # Add a newline for separation
+    if ($itemType -eq 'tables') {
+        $itemPath = Join-Path -Path $scriptDir -ChildPath "$itemType\$itemName"
+        if (Test-Path -LiteralPath $itemPath) {
+            foreach ($file in $fileOrder) {
+                $sqlFilePath = Join-Path $itemPath $file
+                if (Test-Path -LiteralPath $sqlFilePath) {
+                    Write-Host "Merging: $sqlFilePath"
+                    $content = Get-Content $sqlFilePath -Raw
+                    Add-Content -Path $outputFile -Value $content
+                    Add-Content -Path $outputFile -Value "" # Add a newline for separation
+                }
             }
+        }
+    }
+    elseif ($itemType -in @('procedures', 'functions')) {
+        $sqlFilePath = Join-Path $scriptDir "$itemType\$itemName.sql"
+        if (Test-Path -LiteralPath $sqlFilePath) {
+            Write-Host "Merging: $sqlFilePath"
+            $content = Get-Content $sqlFilePath -Raw
+            Add-Content -Path $outputFile -Value $content
+            Add-Content -Path $outputFile -Value "" # Add a newline for separation
         }
     }
 }

@@ -4,9 +4,7 @@
 			"tables": []
 		},
 		"tblPlayers": {
-			"tables": [
-				"tblCountries"
-			]
+			"tables": ["tblCountries"]
 		},
 		"tblSeasons": {
 			"tables": []
@@ -15,25 +13,36 @@
 			"tables": []
 		},
 		"tblPlayersSeasonsTeams": {
-			"tables": [
-				"tblPlayers",
-				"tblSeasons",
-				"tblTeams"
-			]
+			"tables": ["tblPlayers", "tblSeasons", "tblTeams"]
 		},
 		"tblMatches": {
-			"tables": [
-				"tblTeams",
-				"tblSeasons"
-			]
+			"tables": ["tblTeams", "tblSeasons"]
 		},
 		"tblMatchStats": {
-			"tables": [
-				"tblMatches",
-				"tblPlayers"
-			]
+			"tables": ["tblMatches", "tblPlayers"]
 		}
 	},
 	"functions": {},
-	"procedures": {}
+	"procedures": {
+		"usp_GetLeagueTable": {
+			"tables": ["tblMatches", "tblTeams"],
+			"functions": [],
+			"procedures": []
+		},
+		"usp_AssignPlayerToTeam": {
+			"tables": [
+				"tblPlayers",
+				"tblTeams",
+				"tblSeasons",
+				"tblPlayersSeasonsTeams"
+			],
+			"functions": [],
+			"procedures": []
+		},
+		"usp_GetLifetimeHeadToHead": {
+			"tables": ["tblMatches"],
+			"functions": [],
+			"procedures": []
+		}
+	}
 }

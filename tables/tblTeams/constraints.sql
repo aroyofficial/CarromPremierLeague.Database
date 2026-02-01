@@ -2,12 +2,12 @@ SET @pk_exists = (
     SELECT COUNT(*)
     FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
     WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = 'tblSeasons'
+      AND TABLE_NAME = 'tblTeams'
       AND CONSTRAINT_TYPE = 'PRIMARY KEY'
 );
 
 SET @sql = IF(@pk_exists = 0,
-    'ALTER TABLE tblSeasons ADD CONSTRAINT PK_tblSeasons PRIMARY KEY (Id);',
+    'ALTER TABLE tblTeams ADD CONSTRAINT PK_tblTeams PRIMARY KEY (Id);',
     'DO 0;'
 );
 
