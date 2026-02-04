@@ -70,3 +70,20 @@ SET @sql = (
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+SET @column_exists = (
+    SELECT COUNT(*)
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = 'tblSeasons'
+      AND COLUMN_NAME = 'LogoUrl'
+);
+
+SET @sql = IF(@column_exists = 1,
+    'ALTER TABLE tblSeasons DROP COLUMN LogoUrl;',
+    'DO 0;'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
