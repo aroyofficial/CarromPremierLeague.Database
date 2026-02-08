@@ -191,13 +191,30 @@ DEALLOCATE PREPARE stmt;
 SET @sql = (
     SELECT IF(
         COUNT(*) = 0,
-        'ALTER TABLE tblMatches ADD COLUMN Outcome TINYINT NULL;',
+        'ALTER TABLE tblMatches ADD COLUMN Outcome TINYINT DEFAULT 3;',
         'DO 0;'
     )
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
       AND TABLE_NAME = @tableName
       AND COLUMN_NAME = 'Outcome'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- TossOutcome column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblMatches ADD COLUMN TossOutcome TINYINT DEFAULT 3;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'TossOutcome'
 );
 
 PREPARE stmt FROM @sql;
