@@ -4,8 +4,8 @@ SET @tableName = 'tblMatches';
 SET @sql = (
     SELECT IF(
         COUNT(*) = 0,
-        'ALTER TABLE tblMatches ADD COLUMN Team1 BIGINT NOT NULL;',
-        'DO 0;'
+        'ALTER TABLE tblMatches ADD COLUMN Team1 BIGINT NULL;',
+        'ALTER TABLE tblMatches MODIFY COLUMN Team1 BIGINT NULL;'
     )
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
@@ -21,8 +21,8 @@ DEALLOCATE PREPARE stmt;
 SET @sql = (
     SELECT IF(
         COUNT(*) = 0,
-        'ALTER TABLE tblMatches ADD COLUMN Team2 BIGINT NOT NULL;',
-        'DO 0;'
+        'ALTER TABLE tblMatches ADD COLUMN Team2 BIGINT NULL;',
+        'ALTER TABLE tblMatches MODIFY COLUMN Team2 BIGINT NULL;'
     )
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
