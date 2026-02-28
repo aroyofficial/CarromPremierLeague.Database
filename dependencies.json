@@ -43,6 +43,17 @@
 			"tables": ["tblMatches"],
 			"functions": [],
 			"procedures": []
+		},
+		"usp_GetSeasonTopCoinPotters": {
+			"tables": [
+				"tblMatchStats",
+				"tblMatches",
+				"tblPlayers",
+				"tblPlayersSeasonsTeams",
+				"tblTeams"
+			],
+			"functions": [],
+			"procedures": []
 		}
 	}
 }
