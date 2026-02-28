@@ -10,7 +10,8 @@ VALUES
     (8, 0, 'Sisir K', 'Bagh', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczOSCK1ZTZyk2VcNnqkYmiCs65IOnOAB4S3DPayev3hqqCNk57LEXQe50Olxl8rGxUNhwN2HL3eWUICi4sGH5CcV7Qa4FaPaIJv2up32hvnvVv3PMT497CO-W8KNgPdKpqqSugD1wI8kyOFPx8_gzRbGdA=w500-h500-s-no-gm?authuser=0'),
     (9, 0, 'Arghya K', 'Mishra', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczOqFF3Ag3IRJ9gIpA108ddjNUhyI0Guon3cYCf3dnBdojlEv_cEnW2q6J3_f4eYuZbp9EnnPZJEcRhEWy2YFB9EeyjQH8BgFVfmN8nhVE2-io4V6Alqe-IIPPyD0YtuIb2srnHKP3IhqW0TUgl16zXWJg=w500-h500-s-no-gm?authuser=0'),
     (10, 0, 'Ajit', 'Saha', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczNgWM5pJ8xpLhOUuGngtfBwVZ9lvLy4Hvo18TDJIH68n4smh-jQOyP0ws50m29N7_iIgVINNX1eKn_7Ct0KRkX7PQPuNCv7A7RNn8j0yzZymeM06u0LJNNAo1w4HRKI0X-sz7ebzjTsvta1bJn4zQy-6g=w500-h500-s-no-gm?authuser=0'),
-    (11, 0, 'Priyatosh', 'Das', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0')
+    (11, 0, 'Priyatosh', 'Das', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0'),
+    (12, 0, 'Dipankar', 'Das', NULL, 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0')
 ON DUPLICATE KEY UPDATE
     FirstName = VALUES(FirstName),
     LastName = VALUES(LastName),
