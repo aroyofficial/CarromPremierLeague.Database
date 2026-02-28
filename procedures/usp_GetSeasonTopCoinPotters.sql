@@ -21,7 +21,9 @@ BEGIN
         p.AvatarUrl,
         pst.TeamId,
         t.Name AS TeamName,
-        SUM(IFNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed
+        SUM(IFNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed,
+        SUM(IFNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(IFNULL(ms.StrikersPocketed, 0)) AS StrikersPocketed
     FROM tblMatchStats ms
     INNER JOIN tblMatches m
         ON m.Id = ms.MatchId
@@ -48,6 +50,8 @@ BEGIN
         t.Name
     ORDER BY
         CoinsPocketed DESC,
+        CoinsFined ASC,
+        StrikersPocketed ASC,
         p.FirstName ASC,
         p.LastName ASC
     LIMIT v_Limit;
