@@ -88,17 +88,18 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
--- LogoUrl column
-SET @sql = (
-    SELECT IF(
-        COUNT(*) = 0,
-        'ALTER TABLE tblSeasons ADD COLUMN Status TINYINT DEFAULT 1;',
-        'DO 0;'
-    )
+-- Season phase is derived from StartDate and EndDate, so Status is not stored.
+SET @column_exists = (
+    SELECT COUNT(*)
     FROM INFORMATION_SCHEMA.COLUMNS
     WHERE TABLE_SCHEMA = DATABASE()
-      AND TABLE_NAME = @tableName
+      AND TABLE_NAME = 'tblSeasons'
       AND COLUMN_NAME = 'Status'
+);
+
+SET @sql = IF(@column_exists = 1,
+    'ALTER TABLE tblSeasons DROP COLUMN Status;',
+    'DO 0;'
 );
 
 PREPARE stmt FROM @sql;
