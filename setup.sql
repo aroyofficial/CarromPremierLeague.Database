@@ -37,8 +37,13 @@ CREATE TABLE dbo.tblSeasons (
     Name NVARCHAR(255) NOT NULL,
     StartDate DATE NULL,
     EndDate DATE NULL,
+    [Show] BIT NOT NULL CONSTRAINT DF_tblSeasons_Show DEFAULT 1,
     CONSTRAINT CK_tblSeasons_DateRange CHECK (EndDate IS NULL OR StartDate IS NULL OR EndDate >= StartDate)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblSeasons', N'Show') IS NULL
+    ALTER TABLE dbo.tblSeasons ADD [Show] BIT NOT NULL CONSTRAINT DF_tblSeasons_Show DEFAULT 1;
 GO
 
 IF OBJECT_ID(N'dbo.tblTeams', N'U') IS NULL
@@ -53,6 +58,20 @@ CREATE TABLE dbo.tblTeams (
 );
 GO
 
+IF OBJECT_ID(N'dbo.tblSeasonsTeams', N'U') IS NULL
+CREATE TABLE dbo.tblSeasonsTeams (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblSeasonsTeams PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSeasonsTeams_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSeasonsTeams_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblSeasonsTeams_Void DEFAULT 0,
+    SeasonId BIGINT NOT NULL,
+    TeamId BIGINT NOT NULL,
+    CONSTRAINT UQ_tblSeasonsTeams_Season_Team UNIQUE (SeasonId, TeamId),
+    CONSTRAINT FK_tblSeasonsTeams_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id),
+    CONSTRAINT FK_tblSeasonsTeams_tblTeams FOREIGN KEY (TeamId) REFERENCES dbo.tblTeams(Id)
+);
+GO
+
 IF OBJECT_ID(N'dbo.tblPlayers', N'U') IS NULL
 CREATE TABLE dbo.tblPlayers (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblPlayers PRIMARY KEY,
@@ -64,8 +83,18 @@ CREATE TABLE dbo.tblPlayers (
     DateOfBirth DATE NULL,
     AvatarUrl NVARCHAR(2048) NULL,
     NationalityId BIGINT NULL,
-    CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id)
+    DebutSeasonId BIGINT NULL,
+    CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id),
+    CONSTRAINT FK_tblPlayers_tblSeasons_Debut FOREIGN KEY (DebutSeasonId) REFERENCES dbo.tblSeasons(Id)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblPlayers', N'DebutSeasonId') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD DebutSeasonId BIGINT NULL;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_tblPlayers_tblSeasons_Debut')
+    ALTER TABLE dbo.tblPlayers ADD CONSTRAINT FK_tblPlayers_tblSeasons_Debut FOREIGN KEY (DebutSeasonId) REFERENCES dbo.tblSeasons(Id);
 GO
 
 IF OBJECT_ID(N'dbo.tblPlayersSeasonsTeams', N'U') IS NULL
@@ -391,11 +420,9 @@ GO
 IF NOT EXISTS (SELECT 1 FROM dbo.[tblSeasons])
 BEGIN
     SET IDENTITY_INSERT dbo.[tblSeasons] ON;
-    INSERT INTO tblSeasons (Id, Name, StartDate, EndDate)
+    INSERT INTO tblSeasons (Id, Name, StartDate, EndDate, [Show])
 VALUES
-    (1, '2026 Season 1', '2026-01-25', '2026-01-25'),
-    (2, '2026 Season 2', '2026-03-01', '2026-03-08'),
-    (3, '2026 Season 3', '2026-12-27', '2026-12-27');
+    (3, '2026 Season 3', '2026-12-27', '2026-12-27', 1);
     SET IDENTITY_INSERT dbo.[tblSeasons] OFF;
 END
 GO
@@ -408,28 +435,44 @@ VALUES
     (1, 'Ghoshpara Strikers', 'Roar of the Board', 'https://lh3.googleusercontent.com/pw/AP1GczOwWRqbzRxtbAczr1cjZP9G2x768va2xxxMR8KOJQiwAz2JP7J2fqgR0bVDSfQAVIWsBhw17tXqE_o0sdVYdO3F9CKlWXi88KwtU1O-WTyHZG8EgthasTuF3lzpBYPw67PYB4GKq_-DldsZ7C2NC2LXww=w346-h346-s-no-gm?authuser=0'),
     (2, 'Sasthitala Smashers', 'Power in Every Pocket', 'https://lh3.googleusercontent.com/pw/AP1GczP_u52hNJ_vg4neAlzdgA0rENSokLRe_VY4HWcdMSpGFQ4ZDqpdh_TJR7so88ddvSlJjwhnaSss1rc_JQ3weg0K9m20G_478-jdC5oEUOmvezt1mHds-bxZIeRhO3YDKAYJQ7OxWJFisyPSdkbzmAkI_A=w346-h346-s-no-gm?authuser=0'),
     (3, 'Santinagar Slayers', 'Strike to Conquer', 'https://lh3.googleusercontent.com/pw/AP1GczOr0OX5wyDx05jYk57OJp-dTD4lx_nIJ3cZ1epup267Y9dZUc9jNR8Nu53ayqrWWo5IvpPN2rhiH96Zqlzz46Q_pVXwlkFxAxo91unV7D6cSJbvk6H6vR6tghHAJL-BY9mCjhuUqewM6zrHzhTM0pHSGQ=w346-h346-s-no-gm?authuser=0'),
-    (4, 'Nischinda Ninjas', 'Silent, Sharp, Superior', 'https://lh3.googleusercontent.com/pw/AP1GczM2jls5q1Ehv3Rwx-b3Q0QtLPIJih-taVZgb1RdyofOZwfMyEN_WYXLyx-82sCt-mIrvgzKiP8MpG5lHVFnUDsEe8KeHfCOyMMf2AgmAJtFjw9on20s_F48NPCHMiWjDI3RZXDyOLQ9HHBmy8KJo8eqQw=w346-h346-s-no-gm?authuser=0');
+    (4, 'Nischinda Ninjas', 'Silent, Sharp, Superior', 'https://lh3.googleusercontent.com/pw/AP1GczM2jls5q1Ehv3Rwx-b3Q0QtLPIJih-taVZgb1RdyofOZwfMyEN_WYXLyx-82sCt-mIrvgzKiP8MpG5lHVFnUDsEe8KeHfCOyMMf2AgmAJtFjw9on20s_F48NPCHMiWjDI3RZXDyOLQ9HHBmy8KJo8eqQw=w346-h346-s-no-gm?authuser=0'),
+    (5, 'Kumillapara Kings', 'Crown of the Board', 'public/assets/images/teams/kumillapara_kings.png');
     SET IDENTITY_INSERT dbo.[tblTeams] OFF;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.[tblSeasonsTeams])
+BEGIN
+    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] ON;
+    INSERT INTO tblSeasonsTeams (Id, SeasonId, TeamId, Void)
+VALUES
+    (1, 3, 1, 0),
+    (2, 3, 2, 0),
+    (3, 3, 3, 0),
+    (4, 3, 4, 0),
+    (5, 3, 5, 0);
+    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] OFF;
 END
 GO
 
 IF NOT EXISTS (SELECT 1 FROM dbo.[tblPlayers])
 BEGIN
     SET IDENTITY_INSERT dbo.[tblPlayers] ON;
-    INSERT INTO tblPlayers (Id, Void, FirstName, LastName, DateOfBirth, NationalityId, AvatarUrl)
+    INSERT INTO tblPlayers (Id, Void, FirstName, LastName, DateOfBirth, NationalityId, AvatarUrl, DebutSeasonId)
 VALUES
-    (1, 0, 'Arijit', 'Roy', '2000-07-02', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMPp0ohBmJBb8-pZtqoS7cloF2JJRRNogB-OJ8oPO0PvVnXdwRiyOc1V_zulWrRdBmNDHFcDFwtSkFS48JkawIJ0LpXXUgj6FNFiGA84SN9FTDQZrcjGMa0kftuzSR7yU8ypEGkOLc2d33og9RSagaRvg=w500-h500-s-no-gm?authuser=0'),
-    (2, 0, 'Sanchar', 'Bagh', '2001-07-22', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMjRdm59jvJIHnRj0q514dvDMaJyJqnsECA-XD2glBqosGKGyMLkOCeQuKaV8iOBsG8HZFg12fTQbYln7uOggQCoXOc-f-LE3vNg45bOavB5TP1Ogq25vO8gWrN93bNwQl0SpZO5aul4No9Psrf13b0vQ=w500-h500-s-no-gm?authuser=0'),
-    (3, 0, 'Avirup', 'Saha', '2005-12-30', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPjXqJX79aKxXi-mtIOOJvdeMGL1w404m0mEas1O6woBcQW0hzPmGY4oDhhTCzxPo-GQ21iCWctRDwP7j5hZBJvjW1Bfg4kvF350JSvpus6d0sAvUoHCYGBrc4KerC6gMcCyk5cmSsV8VXDoSjIfRlnuA=w500-h500-s-no-gm?authuser=0'),
-    (4, 0, 'Tusar', 'Maji', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPVAeMXI8RhoN6jiHVmRcvAzc_Y0sQlFSei6-VQsefm-YhNjdRUyOiifmtf4GzBbJkq0_pL0mLI-BswShS1DrGEhQfPMlhFexth5j7E63UfbGXjf0UKI19zmISWHN8nmS3hhJsJ1caJbCm0MVLQ_pWXzw=w500-h500-s-no-gm?authuser=0'),
-    (5, 0, 'Tushar', 'Roy', '2006-09-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMhQVNL4gLQ2E1z87kKQOiFmwxJdZGpiXuiaDu3dzfAtCtWDavZUjEJeJ2ibqlIEPliEZL3C7XppClGhN9lrYufREmLqzC9tabNXXNljmHLMu_oCr2YeXrchQvUofN94OZgjg0a3MIIoYrbx1gdceJApQ=w500-h500-s-no-gm?authuser=0'),
-    (6, 0, 'Debjit', 'Pal', '2005-07-25', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPoo0sDOdxHBQvWSo-cZiQNmNb3tQ9_0moUZXz2hHNl2SZ5aCX1kgJn8MEEcTDPjnW6xUdpfcsTLtt9OZoBE-okI2mVAmAvuvdI84jgpN2aj488srQKWEHv8mw6y901_arkc9NSzM7--povzqxOWMP7iw=w500-h500-s-no-gm?authuser=0'),
-    (7, 0, 'Sohan', 'Ghosh', '2006-03-15', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPOdLR8sj-rYJh7hL-k6ZhDf2FJk47mc8hi-bizY5wIhVnbO6lkj2Msx9JnMg76Z8_OZ8qC2dMPfEhZlXEzDEkHiABKz5B1KMvsddQsbH-8LuYabp6kCuxadFqyYBMWhv8orVi3Z8x0kyLbmfiIsyK1rw=w500-h500-s-no-gm?authuser=0'),
-    (8, 0, 'Sisir K', 'Bagh', '1962-09-13', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOSCK1ZTZyk2VcNnqkYmiCs65IOnOAB4S3DPayev3hqqCNk57LEXQe50Olxl8rGxUNhwN2HL3eWUICi4sGH5CcV7Qa4FaPaIJv2up32hvnvVv3PMT497CO-W8KNgPdKpqqSugD1wI8kyOFPx8_gzRbGdA=w500-h500-s-no-gm?authuser=0'),
-    (9, 0, 'Arghya K', 'Mishra', '2001-04-09', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOqFF3Ag3IRJ9gIpA108ddjNUhyI0Guon3cYCf3dnBdojlEv_cEnW2q6J3_f4eYuZbp9EnnPZJEcRhEWy2YFB9EeyjQH8BgFVfmN8nhVE2-io4V6Alqe-IIPPyD0YtuIb2srnHKP3IhqW0TUgl16zXWJg=w500-h500-s-no-gm?authuser=0'),
-    (10, 0, 'Ajit', 'Saha', '1972-01-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNgWM5pJ8xpLhOUuGngtfBwVZ9lvLy4Hvo18TDJIH68n4smh-jQOyP0ws50m29N7_iIgVINNX1eKn_7Ct0KRkX7PQPuNCv7A7RNn8j0yzZymeM06u0LJNNAo1w4HRKI0X-sz7ebzjTsvta1bJn4zQy-6g=w500-h500-s-no-gm?authuser=0'),
-    (11, 0, 'Priyatosh', 'Das', '2005-09-03', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0'),
-    (12, 0, 'Dipankar', 'Das', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0');
+    (1, 0, 'Arijit', 'Roy', '2000-07-02', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMPp0ohBmJBb8-pZtqoS7cloF2JJRRNogB-OJ8oPO0PvVnXdwRiyOc1V_zulWrRdBmNDHFcDFwtSkFS48JkawIJ0LpXXUgj6FNFiGA84SN9FTDQZrcjGMa0kftuzSR7yU8ypEGkOLc2d33og9RSagaRvg=w500-h500-s-no-gm?authuser=0', 3),
+    (2, 0, 'Sanchar', 'Bagh', '2001-07-22', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMjRdm59jvJIHnRj0q514dvDMaJyJqnsECA-XD2glBqosGKGyMLkOCeQuKaV8iOBsG8HZFg12fTQbYln7uOggQCoXOc-f-LE3vNg45bOavB5TP1Ogq25vO8gWrN93bNwQl0SpZO5aul4No9Psrf13b0vQ=w500-h500-s-no-gm?authuser=0', 3),
+    (3, 0, 'Avirup', 'Saha', '2005-12-30', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPjXqJX79aKxXi-mtIOOJvdeMGL1w404m0mEas1O6woBcQW0hzPmGY4oDhhTCzxPo-GQ21iCWctRDwP7j5hZBJvjW1Bfg4kvF350JSvpus6d0sAvUoHCYGBrc4KerC6gMcCyk5cmSsV8VXDoSjIfRlnuA=w500-h500-s-no-gm?authuser=0', 3),
+    (4, 0, 'Tusar', 'Maji', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPVAeMXI8RhoN6jiHVmRcvAzc_Y0sQlFSei6-VQsefm-YhNjdRUyOiifmtf4GzBbJkq0_pL0mLI-BswShS1DrGEhQfPMlhFexth5j7E63UfbGXjf0UKI19zmISWHN8nmS3hhJsJ1caJbCm0MVLQ_pWXzw=w500-h500-s-no-gm?authuser=0', 3),
+    (5, 0, 'Tushar', 'Roy', '2006-09-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMhQVNL4gLQ2E1z87kKQOiFmwxJdZGpiXuiaDu3dzfAtCtWDavZUjEJeJ2ibqlIEPliEZL3C7XppClGhN9lrYufREmLqzC9tabNXXNljmHLMu_oCr2YeXrchQvUofN94OZgjg0a3MIIoYrbx1gdceJApQ=w500-h500-s-no-gm?authuser=0', 3),
+    (6, 0, 'Debjit', 'Pal', '2005-07-25', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPoo0sDOdxHBQvWSo-cZiQNmNb3tQ9_0moUZXz2hHNl2SZ5aCX1kgJn8MEEcTDPjnW6xUdpfcsTLtt9OZoBE-okI2mVAmAvuvdI84jgpN2aj488srQKWEHv8mw6y901_arkc9NSzM7--povzqxOWMP7iw=w500-h500-s-no-gm?authuser=0', 3),
+    (7, 0, 'Sohan', 'Ghosh', '2006-03-15', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPOdLR8sj-rYJh7hL-k6ZhDf2FJk47mc8hi-bizY5wIhVnbO6lkj2Msx9JnMg76Z8_OZ8qC2dMPfEhZlXEzDEkHiABKz5B1KMvsddQsbH-8LuYabp6kCuxadFqyYBMWhv8orVi3Z8x0kyLbmfiIsyK1rw=w500-h500-s-no-gm?authuser=0', 3),
+    (8, 0, 'Sisir K', 'Bagh', '1962-09-13', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOSCK1ZTZyk2VcNnqkYmiCs65IOnOAB4S3DPayev3hqqCNk57LEXQe50Olxl8rGxUNhwN2HL3eWUICi4sGH5CcV7Qa4FaPaIJv2up32hvnvVv3PMT497CO-W8KNgPdKpqqSugD1wI8kyOFPx8_gzRbGdA=w500-h500-s-no-gm?authuser=0', 3),
+    (9, 0, 'Arghya K', 'Mishra', '2001-04-09', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOqFF3Ag3IRJ9gIpA108ddjNUhyI0Guon3cYCf3dnBdojlEv_cEnW2q6J3_f4eYuZbp9EnnPZJEcRhEWy2YFB9EeyjQH8BgFVfmN8nhVE2-io4V6Alqe-IIPPyD0YtuIb2srnHKP3IhqW0TUgl16zXWJg=w500-h500-s-no-gm?authuser=0', 3),
+    (10, 0, 'Ajit', 'Saha', '1972-01-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNgWM5pJ8xpLhOUuGngtfBwVZ9lvLy4Hvo18TDJIH68n4smh-jQOyP0ws50m29N7_iIgVINNX1eKn_7Ct0KRkX7PQPuNCv7A7RNn8j0yzZymeM06u0LJNNAo1w4HRKI0X-sz7ebzjTsvta1bJn4zQy-6g=w500-h500-s-no-gm?authuser=0', 3),
+    (11, 0, 'Priyatosh', 'Das', '2005-09-03', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
+    (12, 0, 'Dipankar', 'Das', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
+    (13, 0, 'Imon', 'Bagh', '1990-08-01', 102, 'https://lh3.googleusercontent.com/pw/AP1GczM8ZO7ODDz7qjBxXmNtVxIXnkNXm33sVZwmuzbtKQ7nbRyRrBR4Lp2zio8WzGAvjisWuKR6edzObnoLCJndj3llUj7wj5vE0Mj72Sydu5IqkOwqF1ock_74k0krecfvY4IzbZE1kG1frlzP9mpvXIYlhQ=w835-h843-s-no-gm?authuser=0', 3);
     SET IDENTITY_INSERT dbo.[tblPlayers] OFF;
 END
 GO
@@ -467,35 +510,111 @@ BEGIN
         ELSE 1 END;
 
     IF @SeasonStatus = 3
-    SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
-    FROM dbo.tblMatches
-    WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0 AND Outcome IN (1, 2)
-    ORDER BY ScheduledDate DESC, Id DESC;
+    BEGIN
+        DECLARE @FinalTeam1 BIGINT, @FinalTeam2 BIGINT, @FinalOutcome TINYINT, @FinalOrder INT;
+        SELECT TOP (1)
+            @FinalTeam1 = Team1,
+            @FinalTeam2 = Team2,
+            @FinalOutcome = Outcome,
+            @FinalOrder = [Order]
+        FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0
+        ORDER BY [Order] DESC, Id DESC;
+
+        IF @FinalOutcome IN (1, 2)
+            SET @WinnerTeamId = CASE @FinalOutcome WHEN 1 THEN @FinalTeam1 WHEN 2 THEN @FinalTeam2 END;
+        ELSE IF @FinalOutcome = 3 AND @FinalTeam1 IS NOT NULL AND @FinalTeam2 IS NOT NULL
+            SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
+            FROM dbo.tblMatches
+            WHERE SeasonId = @p_SeasonId
+              AND Category = 7
+              AND Status = 3
+              AND Void = 0
+              AND Outcome IN (1, 2)
+              AND [Order] > @FinalOrder
+              AND (
+                    (Team1 = @FinalTeam1 AND Team2 = @FinalTeam2)
+                    OR (Team1 = @FinalTeam2 AND Team2 = @FinalTeam1)
+              )
+            ORDER BY [Order] DESC, Id DESC;
+    END
 
     ;WITH LeagueMatches AS (
-        SELECT * FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Category = 1 AND Status = 3 AND Void = 0
+        SELECT *
+        FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId
+          AND Category = 1
+          AND Status = 3
+          AND Void = 0
+    ),
+    SeasonTeams AS (
+        SELECT TeamId
+        FROM dbo.tblSeasonsTeams
+        WHERE SeasonId = @p_SeasonId
+          AND Void = 0
+        UNION
+        SELECT Team1 FROM LeagueMatches WHERE Team1 IS NOT NULL
+        UNION
+        SELECT Team2 FROM LeagueMatches WHERE Team2 IS NOT NULL
     ),
     TeamStats AS (
         SELECT t.Id AS TeamId, t.Name AS TeamName,
             COUNT(lm.Id) AS MatchesPlayed,
             SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 1 ELSE 0 END) AS Wins,
-            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2 ELSE 0 END) AS Points,
-            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0) ELSE 0 END) AS TotalNetPoints
-        FROM dbo.tblTeams t
-        INNER JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
-        WHERE t.Void = 0
+            SUM(CASE WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1 ELSE 0 END) AS Draws,
+            SUM(CASE
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2
+                WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1
+                ELSE 0
+            END) AS Points,
+            SUM(CASE
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0)
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 2) OR (lm.Team2 = t.Id AND lm.Outcome = 1) THEN -ISNULL(lm.NetPoints, 0)
+                ELSE 0
+            END) AS TotalNetPoints
+        FROM SeasonTeams st
+        INNER JOIN dbo.tblTeams t ON t.Id = st.TeamId AND t.Void = 0
+        LEFT JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
         GROUP BY t.Id, t.Name
+    ),
+    RankedStats AS (
+        SELECT ts.*,
+            (SELECT COUNT(*)
+             FROM LeagueMatches lm
+             INNER JOIN TeamStats opponent
+                ON opponent.TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END
+             WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
+               AND opponent.Points = ts.Points
+               AND opponent.TotalNetPoints = ts.TotalNetPoints) AS HeadToHeadWins,
+            (SELECT COUNT(*)
+             FROM dbo.tblMatches gs
+             WHERE gs.SeasonId = @p_SeasonId
+               AND gs.Category = 7
+               AND gs.GoldenStrike = 1
+               AND gs.Status = 3
+               AND gs.Void = 0
+               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM dbo.tblMatches ko
+                    WHERE ko.SeasonId = gs.SeasonId
+                      AND ko.Void = 0
+                      AND ko.Status = 3
+                      AND ko.Outcome = 3
+                      AND ko.Category IN (2, 3)
+                      AND ko.[Order] < gs.[Order]
+                      AND (
+                            (ko.Team1 = gs.Team1 AND ko.Team2 = gs.Team2)
+                            OR (ko.Team1 = gs.Team2 AND ko.Team2 = gs.Team1)
+                      )
+               )) AS GoldenStrikeWins
+        FROM TeamStats ts
     )
-    SELECT ts.TeamId, ts.TeamName, ts.MatchesPlayed, ts.Wins, ts.Points, ts.TotalNetPoints,
-        (SELECT COUNT(*) FROM LeagueMatches lm
-          WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
-            AND (SELECT Points FROM TeamStats WHERE TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END) = ts.Points
-            AND (SELECT TotalNetPoints FROM TeamStats WHERE TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END) = ts.TotalNetPoints) AS HeadToHeadWins,
-        CASE WHEN ts.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
-    FROM TeamStats ts
-    -- Historical Season 1 standings resolve identical points/net-points by
-    -- team registration order, matching the published reference table.
-    ORDER BY ts.Points DESC, ts.TotalNetPoints DESC, ts.TeamId ASC;
+    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Draws, rs.Points, rs.TotalNetPoints,
+        rs.HeadToHeadWins, rs.GoldenStrikeWins,
+        CASE WHEN rs.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
+    FROM RankedStats rs
+    ORDER BY rs.Points DESC, rs.TotalNetPoints DESC, rs.HeadToHeadWins DESC, rs.GoldenStrikeWins DESC, rs.TeamId ASC;
 
     SELECT @SeasonStatus AS SeasonStatus;
 END

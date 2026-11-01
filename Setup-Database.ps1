@@ -178,8 +178,13 @@ CREATE TABLE dbo.tblSeasons (
     Name NVARCHAR(255) NOT NULL,
     StartDate DATE NULL,
     EndDate DATE NULL,
+    [Show] BIT NOT NULL CONSTRAINT DF_tblSeasons_Show DEFAULT 1,
     CONSTRAINT CK_tblSeasons_DateRange CHECK (EndDate IS NULL OR StartDate IS NULL OR EndDate >= StartDate)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblSeasons', N'Show') IS NULL
+    ALTER TABLE dbo.tblSeasons ADD [Show] BIT NOT NULL CONSTRAINT DF_tblSeasons_Show DEFAULT 1;
 GO
 
 IF OBJECT_ID(N'dbo.tblTeams', N'U') IS NULL
@@ -194,6 +199,20 @@ CREATE TABLE dbo.tblTeams (
 );
 GO
 
+IF OBJECT_ID(N'dbo.tblSeasonsTeams', N'U') IS NULL
+CREATE TABLE dbo.tblSeasonsTeams (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblSeasonsTeams PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSeasonsTeams_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSeasonsTeams_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblSeasonsTeams_Void DEFAULT 0,
+    SeasonId BIGINT NOT NULL,
+    TeamId BIGINT NOT NULL,
+    CONSTRAINT UQ_tblSeasonsTeams_Season_Team UNIQUE (SeasonId, TeamId),
+    CONSTRAINT FK_tblSeasonsTeams_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id),
+    CONSTRAINT FK_tblSeasonsTeams_tblTeams FOREIGN KEY (TeamId) REFERENCES dbo.tblTeams(Id)
+);
+GO
+
 IF OBJECT_ID(N'dbo.tblPlayers', N'U') IS NULL
 CREATE TABLE dbo.tblPlayers (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblPlayers PRIMARY KEY,
@@ -205,8 +224,18 @@ CREATE TABLE dbo.tblPlayers (
     DateOfBirth DATE NULL,
     AvatarUrl NVARCHAR(2048) NULL,
     NationalityId BIGINT NULL,
-    CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id)
+    DebutSeasonId BIGINT NULL,
+    CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id),
+    CONSTRAINT FK_tblPlayers_tblSeasons_Debut FOREIGN KEY (DebutSeasonId) REFERENCES dbo.tblSeasons(Id)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblPlayers', N'DebutSeasonId') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD DebutSeasonId BIGINT NULL;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_tblPlayers_tblSeasons_Debut')
+    ALTER TABLE dbo.tblPlayers ADD CONSTRAINT FK_tblPlayers_tblSeasons_Debut FOREIGN KEY (DebutSeasonId) REFERENCES dbo.tblSeasons(Id);
 GO
 
 IF OBJECT_ID(N'dbo.tblPlayersSeasonsTeams', N'U') IS NULL
@@ -375,7 +404,7 @@ GO
 $sections = [System.Collections.Generic.List[string]]::new()
 $sections.Add($schemaSql)
 $sections.Add("-- Seed data follows table dependency order.")
-$seededTables = @("tblCountries", "tblSeasons", "tblTeams", "tblPlayers")
+$seededTables = @("tblCountries", "tblSeasons", "tblTeams", "tblSeasonsTeams", "tblPlayers")
 foreach ($node in $order) {
     $type, $name = $node.Split("/", 2)
     if ($type -eq "tables" -and $seededTables -contains $name) {
@@ -385,6 +414,64 @@ foreach ($node in $order) {
 }
 $sections.Add("-- No SQL Server functions are currently declared.")
 $sections.Add($proceduresSql)
+$sections.Add(@'
+-- Keep generated setups aligned with the standings tie-break rules.
+CREATE OR ALTER PROCEDURE dbo.usp_GetLeagueTable @p_SeasonId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @WinnerTeamId BIGINT = NULL;
+    DECLARE @SeasonStatus TINYINT = CASE
+        WHEN NOT EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Void = 0) THEN 1
+        WHEN EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Status = 2 AND Void = 0) THEN 2
+        WHEN NOT EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Status <> 3 AND Void = 0) THEN 3
+        ELSE 1 END;
+
+    IF @SeasonStatus = 3
+        SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
+        FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0 AND Outcome IN (1, 2)
+        ORDER BY ScheduledDate DESC, Id DESC;
+
+    ;WITH LeagueMatches AS (
+        SELECT * FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId AND Category = 1 AND Status = 3 AND Void = 0
+    ),
+    SeasonTeams AS (
+        SELECT TeamId FROM dbo.tblSeasonsTeams WHERE SeasonId = @p_SeasonId AND Void = 0
+        UNION SELECT Team1 FROM LeagueMatches WHERE Team1 IS NOT NULL
+        UNION SELECT Team2 FROM LeagueMatches WHERE Team2 IS NOT NULL
+    ),
+    TeamStats AS (
+        SELECT t.Id AS TeamId, t.Name AS TeamName, COUNT(lm.Id) AS MatchesPlayed,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 1 ELSE 0 END) AS Wins,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2 ELSE 0 END) AS Points,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0) ELSE 0 END) AS TotalNetPoints
+        FROM SeasonTeams st
+        JOIN dbo.tblTeams t ON t.Id = st.TeamId AND t.Void = 0
+        LEFT JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
+        GROUP BY t.Id, t.Name
+    ),
+    RankedStats AS (
+        SELECT ts.*,
+            (SELECT COUNT(*) FROM LeagueMatches lm
+             JOIN TeamStats opponent ON opponent.TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END
+             WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
+               AND opponent.Points = ts.Points AND opponent.TotalNetPoints = ts.TotalNetPoints) AS HeadToHeadWins,
+            (SELECT COUNT(*) FROM dbo.tblMatches gs
+             WHERE gs.SeasonId = @p_SeasonId AND gs.Category = 7 AND gs.GoldenStrike = 1 AND gs.Status = 3 AND gs.Void = 0
+               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))) AS GoldenStrikeWins
+        FROM TeamStats ts
+    )
+    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Points, rs.TotalNetPoints,
+        rs.HeadToHeadWins, rs.GoldenStrikeWins, CASE WHEN rs.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
+    FROM RankedStats rs
+    ORDER BY rs.Points DESC, rs.TotalNetPoints DESC, rs.HeadToHeadWins DESC, rs.GoldenStrikeWins DESC, rs.TeamId ASC;
+
+    SELECT @SeasonStatus AS SeasonStatus;
+END
+GO
+'@)
 $sections.Add("-- No SQL Server triggers are currently declared.")
 
 $content = ($sections -join "`r`n`r`n")

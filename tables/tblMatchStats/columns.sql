@@ -85,6 +85,57 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- OpponentCoinsPocketed column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblMatchStats ADD COLUMN OpponentCoinsPocketed TINYINT NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'OpponentCoinsPocketed'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- SingleFines column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblMatchStats ADD COLUMN SingleFines TINYINT NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'SingleFines'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+-- DoubleFines column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblMatchStats ADD COLUMN DoubleFines TINYINT NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'DoubleFines'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- ShotsTaken column
 SET @sql = (
     SELECT IF(

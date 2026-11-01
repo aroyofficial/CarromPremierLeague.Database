@@ -88,6 +88,23 @@ PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
 
+-- Show column. Filters list a season only when this is true.
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblSeasons ADD COLUMN `Show` BOOLEAN NOT NULL DEFAULT TRUE;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'Show'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
 -- Season phase is derived from StartDate and EndDate, so Status is not stored.
 SET @column_exists = (
     SELECT COUNT(*)

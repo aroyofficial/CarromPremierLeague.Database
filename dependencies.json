@@ -4,13 +4,16 @@
 			"tables": []
 		},
 		"tblPlayers": {
-			"tables": ["tblCountries"]
+			"tables": ["tblCountries", "tblSeasons"]
 		},
 		"tblSeasons": {
 			"tables": []
 		},
 		"tblTeams": {
 			"tables": []
+		},
+		"tblSeasonsTeams": {
+			"tables": ["tblSeasons", "tblTeams"]
 		},
 		"tblPlayersSeasonsTeams": {
 			"tables": ["tblPlayers", "tblSeasons", "tblTeams"]
