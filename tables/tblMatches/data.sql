@@ -1,15 +1,20 @@
 INSERT INTO tblMatches (Id, Team1, Team2, ScheduledDate, Duration, Extra, GoldenStrike, Category, Status, `Order`, SeasonId, NetPoints, Outcome, TossOutcome)
 VALUES
-    (8, 1, 2, '2026-12-27', NULL, NULL, 0, 1, 1, 1, 3, NULL, 3, 3),
-    (9, 3, 4, '2026-12-27', NULL, NULL, 0, 1, 1, 2, 3, NULL, 3, 3),
-    (10, 1, 3, '2026-12-27', NULL, NULL, 0, 1, 1, 3, 3, NULL, 3, 3),
-    (11, 2, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 4, 3, NULL, 3, 3),
-    (12, 1, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 5, 3, NULL, 3, 3),
-    (13, 2, 4, '2026-12-27', NULL, NULL, 0, 1, 1, 6, 3, NULL, 3, 3),
+    (8, 1, 6, '2026-12-27', NULL, NULL, 0, 1, 1, 1, 3, NULL, 3, 3),
+    (9, 2, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 2, 3, NULL, 3, 3),
+    (10, 3, 4, '2026-12-27', NULL, NULL, 0, 1, 1, 3, 3, NULL, 3, 3),
+    (11, 1, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 4, 3, NULL, 3, 3),
+    (12, 4, 6, '2026-12-27', NULL, NULL, 0, 1, 1, 5, 3, NULL, 3, 3),
+    (13, 2, 3, '2026-12-27', NULL, NULL, 0, 1, 1, 6, 3, NULL, 3, 3),
     (14, 1, 4, '2026-12-27', NULL, NULL, 0, 1, 1, 7, 3, NULL, 3, 3),
     (15, 3, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 8, 3, NULL, 3, 3),
-    (16, 2, 3, '2026-12-27', NULL, NULL, 0, 1, 1, 9, 3, NULL, 3, 3),
-    (17, 4, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 10, 3, NULL, 3, 3)
+    (16, 2, 6, '2026-12-27', NULL, NULL, 0, 1, 1, 9, 3, NULL, 3, 3),
+    (17, 1, 3, '2026-12-27', NULL, NULL, 0, 1, 1, 10, 3, NULL, 3, 3),
+    (18, 2, 4, '2026-12-27', NULL, NULL, 0, 1, 1, 11, 3, NULL, 3, 3),
+    (19, 5, 6, '2026-12-27', NULL, NULL, 0, 1, 1, 12, 3, NULL, 3, 3),
+    (20, 1, 2, '2026-12-27', NULL, NULL, 0, 1, 1, 13, 3, NULL, 3, 3),
+    (21, 3, 6, '2026-12-27', NULL, NULL, 0, 1, 1, 14, 3, NULL, 3, 3),
+    (22, 4, 5, '2026-12-27', NULL, NULL, 0, 1, 1, 15, 3, NULL, 3, 3)
 ON DUPLICATE KEY UPDATE
     Team1 = VALUES(Team1),
     Team2 = VALUES(Team2),

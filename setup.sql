@@ -152,10 +152,84 @@ CREATE TABLE dbo.tblMatchStats (
     StrikersPocketed TINYINT NULL,
     CoinsFined TINYINT NULL,
     ShotsTaken TINYINT NULL,
+    OpponentCoinsPocketed TINYINT NULL,
+    SingleFines TINYINT NULL,
+    DoubleFines TINYINT NULL,
     CONSTRAINT UQ_tblMatchStats_Match_Player UNIQUE (MatchId, PlayerId),
     CONSTRAINT FK_tblMatchStats_tblMatches FOREIGN KEY (MatchId) REFERENCES dbo.tblMatches(Id),
     CONSTRAINT FK_tblMatchStats_tblPlayers FOREIGN KEY (PlayerId) REFERENCES dbo.tblPlayers(Id)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblMatchStats', N'OpponentCoinsPocketed') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD OpponentCoinsPocketed TINYINT NULL;
+IF COL_LENGTH(N'dbo.tblMatchStats', N'SingleFines') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD SingleFines TINYINT NULL;
+IF COL_LENGTH(N'dbo.tblMatchStats', N'DoubleFines') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD DoubleFines TINYINT NULL;
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblMatchStats_CoinsPocketed', N'C') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD CONSTRAINT CK_tblMatchStats_CoinsPocketed
+        CHECK (CoinsPocketed IS NULL OR CoinsPocketed <= 9);
+IF OBJECT_ID(N'dbo.CK_tblMatchStats_OpponentCoinsPocketed', N'C') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD CONSTRAINT CK_tblMatchStats_OpponentCoinsPocketed
+        CHECK (OpponentCoinsPocketed IS NULL OR OpponentCoinsPocketed <= 9);
+GO
+
+CREATE OR ALTER TRIGGER dbo.TR_tblMatchStats_NineCoins
+ON dbo.tblMatchStats
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted AS entered
+        INNER JOIN dbo.tblMatches AS m ON m.Id = entered.MatchId
+        LEFT JOIN dbo.tblPlayersSeasonsTeams AS pst
+            ON pst.PlayerId = entered.PlayerId
+           AND pst.SeasonId = m.SeasonId
+           AND pst.Void = 0
+           AND pst.TeamId IN (m.Team1, m.Team2)
+        WHERE entered.Void = 0
+          AND pst.PlayerId IS NULL
+    )
+    BEGIN
+        THROW 50020, 'A scorecard player must belong to one of the two teams in the match.', 1;
+    END;
+
+    DECLARE @overflow INT = 0;
+
+    ;WITH sides AS (
+        SELECT
+            m.Id AS MatchId,
+            pst.TeamId,
+            SUM(ISNULL(ms.CoinsPocketed, 0)) AS OwnCoins,
+            SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoins
+        FROM dbo.tblMatches AS m
+        INNER JOIN dbo.tblMatchStats AS ms ON ms.MatchId = m.Id AND ms.Void = 0
+        INNER JOIN dbo.tblPlayersSeasonsTeams AS pst
+            ON pst.PlayerId = ms.PlayerId
+           AND pst.SeasonId = m.SeasonId
+           AND pst.Void = 0
+        WHERE m.Id IN (SELECT DISTINCT MatchId FROM inserted)
+          AND pst.TeamId IN (m.Team1, m.Team2)
+        GROUP BY m.Id, pst.TeamId
+    )
+    SELECT @overflow = COUNT(*)
+    FROM sides AS mine
+    LEFT JOIN sides AS theirs
+        ON theirs.MatchId = mine.MatchId
+       AND theirs.TeamId <> mine.TeamId
+    WHERE mine.OwnCoins + ISNULL(theirs.OpponentCoins, 0) > 9;
+
+    IF @overflow > 0
+    BEGIN
+        THROW 50021, 'Each colour has only 9 coins.', 1;
+    END;
+END;
 GO
 
 -- Seed data follows table dependency order.
@@ -422,6 +496,8 @@ BEGIN
     SET IDENTITY_INSERT dbo.[tblSeasons] ON;
     INSERT INTO tblSeasons (Id, Name, StartDate, EndDate, [Show])
 VALUES
+    (1, '2026 Season 1', '2026-01-25', '2026-01-25', 0),
+    (2, '2026 Season 2', '2026-03-01', '2026-03-08', 0),
     (3, '2026 Season 3', '2026-12-27', '2026-12-27', 1);
     SET IDENTITY_INSERT dbo.[tblSeasons] OFF;
 END
