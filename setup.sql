@@ -436,7 +436,8 @@ VALUES
     (2, 'Sasthitala Smashers', 'Power in Every Pocket', 'https://lh3.googleusercontent.com/pw/AP1GczP_u52hNJ_vg4neAlzdgA0rENSokLRe_VY4HWcdMSpGFQ4ZDqpdh_TJR7so88ddvSlJjwhnaSss1rc_JQ3weg0K9m20G_478-jdC5oEUOmvezt1mHds-bxZIeRhO3YDKAYJQ7OxWJFisyPSdkbzmAkI_A=w346-h346-s-no-gm?authuser=0'),
     (3, 'Santinagar Slayers', 'Strike to Conquer', 'https://lh3.googleusercontent.com/pw/AP1GczOr0OX5wyDx05jYk57OJp-dTD4lx_nIJ3cZ1epup267Y9dZUc9jNR8Nu53ayqrWWo5IvpPN2rhiH96Zqlzz46Q_pVXwlkFxAxo91unV7D6cSJbvk6H6vR6tghHAJL-BY9mCjhuUqewM6zrHzhTM0pHSGQ=w346-h346-s-no-gm?authuser=0'),
     (4, 'Nischinda Ninjas', 'Silent, Sharp, Superior', 'https://lh3.googleusercontent.com/pw/AP1GczM2jls5q1Ehv3Rwx-b3Q0QtLPIJih-taVZgb1RdyofOZwfMyEN_WYXLyx-82sCt-mIrvgzKiP8MpG5lHVFnUDsEe8KeHfCOyMMf2AgmAJtFjw9on20s_F48NPCHMiWjDI3RZXDyOLQ9HHBmy8KJo8eqQw=w346-h346-s-no-gm?authuser=0'),
-    (5, 'Kumillapara Kings', 'Crown of the Board', 'public/assets/images/teams/kumillapara_kings.png');
+    (5, 'Kumillapara Kings', 'Crown of the Board', 'public/assets/images/teams/kumillapara_kings.png'),
+    (6, 'Dum Dum Diamonds', 'Brilliance of the Board', 'public/assets/images/teams/dum_dum_diamonds.png');
     SET IDENTITY_INSERT dbo.[tblTeams] OFF;
 END
 GO
@@ -450,7 +451,8 @@ VALUES
     (2, 3, 2, 0),
     (3, 3, 3, 0),
     (4, 3, 4, 0),
-    (5, 3, 5, 0);
+    (5, 3, 5, 0),
+    (6, 3, 6, 0);
     SET IDENTITY_INSERT dbo.[tblSeasonsTeams] OFF;
 END
 GO
@@ -472,7 +474,9 @@ VALUES
     (10, 0, 'Ajit', 'Saha', '1972-01-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNgWM5pJ8xpLhOUuGngtfBwVZ9lvLy4Hvo18TDJIH68n4smh-jQOyP0ws50m29N7_iIgVINNX1eKn_7Ct0KRkX7PQPuNCv7A7RNn8j0yzZymeM06u0LJNNAo1w4HRKI0X-sz7ebzjTsvta1bJn4zQy-6g=w500-h500-s-no-gm?authuser=0', 3),
     (11, 0, 'Priyatosh', 'Das', '2005-09-03', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
     (12, 0, 'Dipankar', 'Das', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
-    (13, 0, 'Imon', 'Bagh', '1990-08-01', 102, 'https://lh3.googleusercontent.com/pw/AP1GczM8ZO7ODDz7qjBxXmNtVxIXnkNXm33sVZwmuzbtKQ7nbRyRrBR4Lp2zio8WzGAvjisWuKR6edzObnoLCJndj3llUj7wj5vE0Mj72Sydu5IqkOwqF1ock_74k0krecfvY4IzbZE1kG1frlzP9mpvXIYlhQ=w835-h843-s-no-gm?authuser=0', 3);
+    (13, 0, 'Imon', 'Bagh', '1990-08-01', 102, 'https://lh3.googleusercontent.com/pw/AP1GczM8ZO7ODDz7qjBxXmNtVxIXnkNXm33sVZwmuzbtKQ7nbRyRrBR4Lp2zio8WzGAvjisWuKR6edzObnoLCJndj3llUj7wj5vE0Mj72Sydu5IqkOwqF1ock_74k0krecfvY4IzbZE1kG1frlzP9mpvXIYlhQ=w835-h843-s-no-gm?authuser=0', 3),
+    (14, 0, 'Akash', 'Gupta', '2003-08-07', 102, NULL, 3),
+    (15, 0, 'Rupankar', 'Das', '2003-09-15', 102, NULL, 3);
     SET IDENTITY_INSERT dbo.[tblPlayers] OFF;
 END
 GO

@@ -9,7 +9,9 @@ VALUES
     (23, 1, 3, 4, 0),
     (24, 7, 3, 4, 0),
     (25, 5, 3, 5, 0),
-    (26, 11, 3, 5, 0)
+    (26, 11, 3, 5, 0),
+    (27, 14, 3, 6, 0),
+    (28, 15, 3, 6, 0)
 ON DUPLICATE KEY UPDATE
     PlayerId = VALUES(PlayerId),
     SeasonId = VALUES(SeasonId),
