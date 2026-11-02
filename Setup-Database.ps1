@@ -151,6 +151,38 @@ SET QUOTED_IDENTIFIER ON;
 SET XACT_ABORT ON;
 GO
 
+IF OBJECT_ID(N'dbo.tblAdmins', N'U') IS NULL
+CREATE TABLE dbo.tblAdmins (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblAdmins PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdmins_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdmins_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblAdmins_Void DEFAULT 0,
+    Username NVARCHAR(100) NOT NULL,
+    PasswordHash VARCHAR(128) NOT NULL,
+    PasswordSalt VARCHAR(128) NOT NULL,
+    PasswordIterations INT NOT NULL CONSTRAINT DF_tblAdmins_PasswordIterations DEFAULT 310000,
+    TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblAdmins_IsActive DEFAULT 1,
+    CONSTRAINT UQ_tblAdmins_Username UNIQUE (Username),
+    CONSTRAINT CK_tblAdmins_PasswordIterations CHECK (PasswordIterations >= 100000)
+);
+GO
+
+IF COL_LENGTH(N'dbo.tblAdmins', N'TokenVersion') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.tblAdmins WHERE Username = N'admin')
+INSERT INTO dbo.tblAdmins (Username, PasswordHash, PasswordSalt, PasswordIterations, IsActive)
+VALUES (
+    N'admin',
+    N'9jvyAVboxIWN5gPPjt-t019o7lmAK4_d8YEIHzXvIU0dBnSqRrvJz78Q7vAa-A8P74xLMMNJh2hRnso68jAnLA',
+    N'X_E-WgD3buk1LMc47qSqV3aUed3o_KQINAlPIhjk9Bk',
+    310000,
+    1
+);
+GO
+
 IF OBJECT_ID(N'dbo.tblCountries', N'U') IS NULL
 CREATE TABLE dbo.tblCountries (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCountries PRIMARY KEY,

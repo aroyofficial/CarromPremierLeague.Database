@@ -10,6 +10,38 @@ SET QUOTED_IDENTIFIER ON;
 SET XACT_ABORT ON;
 GO
 
+IF OBJECT_ID(N'dbo.tblAdmins', N'U') IS NULL
+CREATE TABLE dbo.tblAdmins (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblAdmins PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdmins_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdmins_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblAdmins_Void DEFAULT 0,
+    Username NVARCHAR(100) NOT NULL,
+    PasswordHash VARCHAR(128) NOT NULL,
+    PasswordSalt VARCHAR(128) NOT NULL,
+    PasswordIterations INT NOT NULL CONSTRAINT DF_tblAdmins_PasswordIterations DEFAULT 310000,
+    TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblAdmins_IsActive DEFAULT 1,
+    CONSTRAINT UQ_tblAdmins_Username UNIQUE (Username),
+    CONSTRAINT CK_tblAdmins_PasswordIterations CHECK (PasswordIterations >= 100000)
+);
+GO
+
+IF COL_LENGTH(N'dbo.tblAdmins', N'TokenVersion') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.tblAdmins WHERE Username = N'admin')
+INSERT INTO dbo.tblAdmins (Username, PasswordHash, PasswordSalt, PasswordIterations, IsActive)
+VALUES (
+    N'admin',
+    N'9jvyAVboxIWN5gPPjt-t019o7lmAK4_d8YEIHzXvIU0dBnSqRrvJz78Q7vAa-A8P74xLMMNJh2hRnso68jAnLA',
+    N'X_E-WgD3buk1LMc47qSqV3aUed3o_KQINAlPIhjk9Bk',
+    310000,
+    1
+);
+GO
+
 IF OBJECT_ID(N'dbo.tblCountries', N'U') IS NULL
 CREATE TABLE dbo.tblCountries (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCountries PRIMARY KEY,
@@ -140,6 +172,14 @@ CREATE TABLE dbo.tblMatches (
 );
 GO
 
+IF COL_LENGTH(N'dbo.tblMatches', N'StartedAt') IS NULL
+    ALTER TABLE dbo.tblMatches ADD StartedAt DATETIME2(6) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblMatches', N'ExtraStartedAt') IS NULL
+    ALTER TABLE dbo.tblMatches ADD ExtraStartedAt DATETIME2(6) NULL;
+GO
+
 IF OBJECT_ID(N'dbo.tblMatchStats', N'U') IS NULL
 CREATE TABLE dbo.tblMatchStats (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblMatchStats PRIMARY KEY,
@@ -152,84 +192,10 @@ CREATE TABLE dbo.tblMatchStats (
     StrikersPocketed TINYINT NULL,
     CoinsFined TINYINT NULL,
     ShotsTaken TINYINT NULL,
-    OpponentCoinsPocketed TINYINT NULL,
-    SingleFines TINYINT NULL,
-    DoubleFines TINYINT NULL,
     CONSTRAINT UQ_tblMatchStats_Match_Player UNIQUE (MatchId, PlayerId),
     CONSTRAINT FK_tblMatchStats_tblMatches FOREIGN KEY (MatchId) REFERENCES dbo.tblMatches(Id),
     CONSTRAINT FK_tblMatchStats_tblPlayers FOREIGN KEY (PlayerId) REFERENCES dbo.tblPlayers(Id)
 );
-GO
-
-IF COL_LENGTH(N'dbo.tblMatchStats', N'OpponentCoinsPocketed') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD OpponentCoinsPocketed TINYINT NULL;
-IF COL_LENGTH(N'dbo.tblMatchStats', N'SingleFines') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD SingleFines TINYINT NULL;
-IF COL_LENGTH(N'dbo.tblMatchStats', N'DoubleFines') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD DoubleFines TINYINT NULL;
-GO
-
-IF OBJECT_ID(N'dbo.CK_tblMatchStats_CoinsPocketed', N'C') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD CONSTRAINT CK_tblMatchStats_CoinsPocketed
-        CHECK (CoinsPocketed IS NULL OR CoinsPocketed <= 9);
-IF OBJECT_ID(N'dbo.CK_tblMatchStats_OpponentCoinsPocketed', N'C') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD CONSTRAINT CK_tblMatchStats_OpponentCoinsPocketed
-        CHECK (OpponentCoinsPocketed IS NULL OR OpponentCoinsPocketed <= 9);
-GO
-
-CREATE OR ALTER TRIGGER dbo.TR_tblMatchStats_NineCoins
-ON dbo.tblMatchStats
-AFTER INSERT, UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    IF EXISTS (
-        SELECT 1
-        FROM inserted AS entered
-        INNER JOIN dbo.tblMatches AS m ON m.Id = entered.MatchId
-        LEFT JOIN dbo.tblPlayersSeasonsTeams AS pst
-            ON pst.PlayerId = entered.PlayerId
-           AND pst.SeasonId = m.SeasonId
-           AND pst.Void = 0
-           AND pst.TeamId IN (m.Team1, m.Team2)
-        WHERE entered.Void = 0
-          AND pst.PlayerId IS NULL
-    )
-    BEGIN
-        THROW 50020, 'A scorecard player must belong to one of the two teams in the match.', 1;
-    END;
-
-    DECLARE @overflow INT = 0;
-
-    ;WITH sides AS (
-        SELECT
-            m.Id AS MatchId,
-            pst.TeamId,
-            SUM(ISNULL(ms.CoinsPocketed, 0)) AS OwnCoins,
-            SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoins
-        FROM dbo.tblMatches AS m
-        INNER JOIN dbo.tblMatchStats AS ms ON ms.MatchId = m.Id AND ms.Void = 0
-        INNER JOIN dbo.tblPlayersSeasonsTeams AS pst
-            ON pst.PlayerId = ms.PlayerId
-           AND pst.SeasonId = m.SeasonId
-           AND pst.Void = 0
-        WHERE m.Id IN (SELECT DISTINCT MatchId FROM inserted)
-          AND pst.TeamId IN (m.Team1, m.Team2)
-        GROUP BY m.Id, pst.TeamId
-    )
-    SELECT @overflow = COUNT(*)
-    FROM sides AS mine
-    LEFT JOIN sides AS theirs
-        ON theirs.MatchId = mine.MatchId
-       AND theirs.TeamId <> mine.TeamId
-    WHERE mine.OwnCoins + ISNULL(theirs.OpponentCoins, 0) > 9;
-
-    IF @overflow > 0
-    BEGIN
-        THROW 50021, 'Each colour has only 9 coins.', 1;
-    END;
-END;
 GO
 
 -- Seed data follows table dependency order.
@@ -494,7 +460,7 @@ GO
 IF NOT EXISTS (SELECT 1 FROM dbo.[tblSeasons])
 BEGIN
     SET IDENTITY_INSERT dbo.[tblSeasons] ON;
-    INSERT INTO tblSeasons (Id, Name, StartDate, EndDate, [Show])
+    INSERT INTO tblSeasons (Id, Name, StartDate, EndDate, Show)
 VALUES
     (1, '2026 Season 1', '2026-01-25', '2026-01-25', 0),
     (2, '2026 Season 2', '2026-03-01', '2026-03-08', 0),
@@ -515,21 +481,6 @@ VALUES
     (5, 'Kumillapara Kings', 'Crown of the Board', 'public/assets/images/teams/kumillapara_kings.png'),
     (6, 'Dum Dum Diamonds', 'Brilliance of the Board', 'public/assets/images/teams/dum_dum_diamonds.png');
     SET IDENTITY_INSERT dbo.[tblTeams] OFF;
-END
-GO
-
-IF NOT EXISTS (SELECT 1 FROM dbo.[tblSeasonsTeams])
-BEGIN
-    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] ON;
-    INSERT INTO tblSeasonsTeams (Id, SeasonId, TeamId, Void)
-VALUES
-    (1, 3, 1, 0),
-    (2, 3, 2, 0),
-    (3, 3, 3, 0),
-    (4, 3, 4, 0),
-    (5, 3, 5, 0),
-    (6, 3, 6, 0);
-    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] OFF;
 END
 GO
 
@@ -554,6 +505,21 @@ VALUES
     (14, 0, 'Akash', 'Gupta', '2003-08-07', 102, NULL, 3),
     (15, 0, 'Rupankar', 'Das', '2003-09-15', 102, NULL, 3);
     SET IDENTITY_INSERT dbo.[tblPlayers] OFF;
+END
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.[tblSeasonsTeams])
+BEGIN
+    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] ON;
+    INSERT INTO tblSeasonsTeams (Id, SeasonId, TeamId, Void)
+VALUES
+    (1, 3, 1, 0),
+    (2, 3, 2, 0),
+    (3, 3, 3, 0),
+    (4, 3, 4, 0),
+    (5, 3, 5, 0),
+    (6, 3, 6, 0);
+    SET IDENTITY_INSERT dbo.[tblSeasonsTeams] OFF;
 END
 GO
 
@@ -590,111 +556,35 @@ BEGIN
         ELSE 1 END;
 
     IF @SeasonStatus = 3
-    BEGIN
-        DECLARE @FinalTeam1 BIGINT, @FinalTeam2 BIGINT, @FinalOutcome TINYINT, @FinalOrder INT;
-        SELECT TOP (1)
-            @FinalTeam1 = Team1,
-            @FinalTeam2 = Team2,
-            @FinalOutcome = Outcome,
-            @FinalOrder = [Order]
-        FROM dbo.tblMatches
-        WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0
-        ORDER BY [Order] DESC, Id DESC;
-
-        IF @FinalOutcome IN (1, 2)
-            SET @WinnerTeamId = CASE @FinalOutcome WHEN 1 THEN @FinalTeam1 WHEN 2 THEN @FinalTeam2 END;
-        ELSE IF @FinalOutcome = 3 AND @FinalTeam1 IS NOT NULL AND @FinalTeam2 IS NOT NULL
-            SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
-            FROM dbo.tblMatches
-            WHERE SeasonId = @p_SeasonId
-              AND Category = 7
-              AND Status = 3
-              AND Void = 0
-              AND Outcome IN (1, 2)
-              AND [Order] > @FinalOrder
-              AND (
-                    (Team1 = @FinalTeam1 AND Team2 = @FinalTeam2)
-                    OR (Team1 = @FinalTeam2 AND Team2 = @FinalTeam1)
-              )
-            ORDER BY [Order] DESC, Id DESC;
-    END
+    SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
+    FROM dbo.tblMatches
+    WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0 AND Outcome IN (1, 2)
+    ORDER BY ScheduledDate DESC, Id DESC;
 
     ;WITH LeagueMatches AS (
-        SELECT *
-        FROM dbo.tblMatches
-        WHERE SeasonId = @p_SeasonId
-          AND Category = 1
-          AND Status = 3
-          AND Void = 0
-    ),
-    SeasonTeams AS (
-        SELECT TeamId
-        FROM dbo.tblSeasonsTeams
-        WHERE SeasonId = @p_SeasonId
-          AND Void = 0
-        UNION
-        SELECT Team1 FROM LeagueMatches WHERE Team1 IS NOT NULL
-        UNION
-        SELECT Team2 FROM LeagueMatches WHERE Team2 IS NOT NULL
+        SELECT * FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Category = 1 AND Status = 3 AND Void = 0
     ),
     TeamStats AS (
         SELECT t.Id AS TeamId, t.Name AS TeamName,
             COUNT(lm.Id) AS MatchesPlayed,
             SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 1 ELSE 0 END) AS Wins,
-            SUM(CASE WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1 ELSE 0 END) AS Draws,
-            SUM(CASE
-                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2
-                WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1
-                ELSE 0
-            END) AS Points,
-            SUM(CASE
-                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0)
-                WHEN (lm.Team1 = t.Id AND lm.Outcome = 2) OR (lm.Team2 = t.Id AND lm.Outcome = 1) THEN -ISNULL(lm.NetPoints, 0)
-                ELSE 0
-            END) AS TotalNetPoints
-        FROM SeasonTeams st
-        INNER JOIN dbo.tblTeams t ON t.Id = st.TeamId AND t.Void = 0
-        LEFT JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2 ELSE 0 END) AS Points,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0) ELSE 0 END) AS TotalNetPoints
+        FROM dbo.tblTeams t
+        INNER JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
+        WHERE t.Void = 0
         GROUP BY t.Id, t.Name
-    ),
-    RankedStats AS (
-        SELECT ts.*,
-            (SELECT COUNT(*)
-             FROM LeagueMatches lm
-             INNER JOIN TeamStats opponent
-                ON opponent.TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END
-             WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
-               AND opponent.Points = ts.Points
-               AND opponent.TotalNetPoints = ts.TotalNetPoints) AS HeadToHeadWins,
-            (SELECT COUNT(*)
-             FROM dbo.tblMatches gs
-             WHERE gs.SeasonId = @p_SeasonId
-               AND gs.Category = 7
-               AND gs.GoldenStrike = 1
-               AND gs.Status = 3
-               AND gs.Void = 0
-               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))
-               AND NOT EXISTS (
-                    SELECT 1
-                    FROM dbo.tblMatches ko
-                    WHERE ko.SeasonId = gs.SeasonId
-                      AND ko.Void = 0
-                      AND ko.Status = 3
-                      AND ko.Outcome = 3
-                      AND ko.Category IN (2, 3)
-                      AND ko.[Order] < gs.[Order]
-                      AND (
-                            (ko.Team1 = gs.Team1 AND ko.Team2 = gs.Team2)
-                            OR (ko.Team1 = gs.Team2 AND ko.Team2 = gs.Team1)
-                      )
-               )) AS GoldenStrikeWins
-        FROM TeamStats ts
     )
-    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Draws, rs.Points, rs.TotalNetPoints,
-        rs.HeadToHeadWins, rs.GoldenStrikeWins,
-        CASE WHEN rs.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
-    FROM RankedStats rs
-    ORDER BY rs.Points DESC, rs.TotalNetPoints DESC, rs.HeadToHeadWins DESC, rs.GoldenStrikeWins DESC, rs.TeamId ASC;
+    SELECT ts.TeamId, ts.TeamName, ts.MatchesPlayed, ts.Wins, ts.Points, ts.TotalNetPoints,
+        (SELECT COUNT(*) FROM LeagueMatches lm
+          WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
+            AND (SELECT Points FROM TeamStats WHERE TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END) = ts.Points
+            AND (SELECT TotalNetPoints FROM TeamStats WHERE TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END) = ts.TotalNetPoints) AS HeadToHeadWins,
+        CASE WHEN ts.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
+    FROM TeamStats ts
+    -- Historical Season 1 standings resolve identical points/net-points by
+    -- team registration order, matching the published reference table.
+    ORDER BY ts.Points DESC, ts.TotalNetPoints DESC, ts.TeamId ASC;
 
     SELECT @SeasonStatus AS SeasonStatus;
 END
@@ -731,6 +621,63 @@ BEGIN
     WHERE m.SeasonId = @p_SeasonId AND m.Category = 1 AND m.Status = 3 AND ms.Void = 0
     GROUP BY ms.PlayerId, p.FirstName, p.LastName, p.AvatarUrl, pst.TeamId, t.Name
     ORDER BY CoinsPocketed DESC, CoinsFined ASC, StrikersPocketed ASC, p.FirstName ASC, p.LastName ASC;
+END
+GO
+
+-- Keep generated setups aligned with the standings tie-break rules.
+CREATE OR ALTER PROCEDURE dbo.usp_GetLeagueTable @p_SeasonId BIGINT
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @WinnerTeamId BIGINT = NULL;
+    DECLARE @SeasonStatus TINYINT = CASE
+        WHEN NOT EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Void = 0) THEN 1
+        WHEN EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Status = 2 AND Void = 0) THEN 2
+        WHEN NOT EXISTS (SELECT 1 FROM dbo.tblMatches WHERE SeasonId = @p_SeasonId AND Status <> 3 AND Void = 0) THEN 3
+        ELSE 1 END;
+
+    IF @SeasonStatus = 3
+        SELECT TOP (1) @WinnerTeamId = CASE Outcome WHEN 1 THEN Team1 WHEN 2 THEN Team2 END
+        FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId AND Category = 2 AND Status = 3 AND Void = 0 AND Outcome IN (1, 2)
+        ORDER BY ScheduledDate DESC, Id DESC;
+
+    ;WITH LeagueMatches AS (
+        SELECT * FROM dbo.tblMatches
+        WHERE SeasonId = @p_SeasonId AND Category = 1 AND Status = 3 AND Void = 0
+    ),
+    SeasonTeams AS (
+        SELECT TeamId FROM dbo.tblSeasonsTeams WHERE SeasonId = @p_SeasonId AND Void = 0
+        UNION SELECT Team1 FROM LeagueMatches WHERE Team1 IS NOT NULL
+        UNION SELECT Team2 FROM LeagueMatches WHERE Team2 IS NOT NULL
+    ),
+    TeamStats AS (
+        SELECT t.Id AS TeamId, t.Name AS TeamName, COUNT(lm.Id) AS MatchesPlayed,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 1 ELSE 0 END) AS Wins,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2 ELSE 0 END) AS Points,
+            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0) ELSE 0 END) AS TotalNetPoints
+        FROM SeasonTeams st
+        JOIN dbo.tblTeams t ON t.Id = st.TeamId AND t.Void = 0
+        LEFT JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
+        GROUP BY t.Id, t.Name
+    ),
+    RankedStats AS (
+        SELECT ts.*,
+            (SELECT COUNT(*) FROM LeagueMatches lm
+             JOIN TeamStats opponent ON opponent.TeamId = CASE WHEN lm.Team1 = ts.TeamId THEN lm.Team2 ELSE lm.Team1 END
+             WHERE ((lm.Team1 = ts.TeamId AND lm.Outcome = 1) OR (lm.Team2 = ts.TeamId AND lm.Outcome = 2))
+               AND opponent.Points = ts.Points AND opponent.TotalNetPoints = ts.TotalNetPoints) AS HeadToHeadWins,
+            (SELECT COUNT(*) FROM dbo.tblMatches gs
+             WHERE gs.SeasonId = @p_SeasonId AND gs.Category = 7 AND gs.GoldenStrike = 1 AND gs.Status = 3 AND gs.Void = 0
+               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))) AS GoldenStrikeWins
+        FROM TeamStats ts
+    )
+    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Points, rs.TotalNetPoints,
+        rs.HeadToHeadWins, rs.GoldenStrikeWins, CASE WHEN rs.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
+    FROM RankedStats rs
+    ORDER BY rs.Points DESC, rs.TotalNetPoints DESC, rs.HeadToHeadWins DESC, rs.GoldenStrikeWins DESC, rs.TeamId ASC;
+
+    SELECT @SeasonStatus AS SeasonStatus;
 END
 GO
 

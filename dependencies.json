@@ -1,5 +1,8 @@
 {
 	"tables": {
+		"tblAdmins": {
+			"tables": []
+		},
 		"tblCountries": {
 			"tables": []
 		},
