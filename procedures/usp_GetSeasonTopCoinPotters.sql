@@ -22,7 +22,11 @@ BEGIN
         pst.TeamId,
         t.Name AS TeamName,
         SUM(IFNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed,
+        SUM(IFNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoinsPocketed,
+        SUM(IFNULL(ms.SingleFines, 0)) AS SingleFines,
+        SUM(IFNULL(ms.DoubleFines, 0)) AS DoubleFines,
         SUM(IFNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(IFNULL(ms.CoinsPocketed, 0)) - SUM(IFNULL(ms.CoinsFined, 0)) AS NetCoins,
         SUM(IFNULL(ms.StrikersPocketed, 0)) AS StrikersPocketed
     FROM tblMatchStats ms
     INNER JOIN tblMatches m
@@ -49,11 +53,15 @@ BEGIN
         pst.TeamId,
         t.Name
     ORDER BY
+        NetCoins DESC,
         CoinsPocketed DESC,
-        CoinsFined ASC,
+        DoubleFines ASC,
+        SingleFines ASC,
+        OpponentCoinsPocketed ASC,
         StrikersPocketed ASC,
         p.FirstName ASC,
-        p.LastName ASC
+        p.LastName ASC,
+        ms.PlayerId ASC
     LIMIT v_Limit;
 END$$
 

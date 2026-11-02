@@ -213,6 +213,66 @@ IF COL_LENGTH(N'dbo.tblMatchStats', N'DoubleFines') IS NULL
     ALTER TABLE dbo.tblMatchStats ADD DoubleFines TINYINT NULL;
 GO
 
+-- A fine puts one of the team's pocketed coins back on the board, where it can be pocketed again.
+-- A fine the team cannot pay yet is due and returns nothing. So a colour never has more than
+-- max(0, own coins - fined coins) + the other team's opponent coins of that colour off the board.
+CREATE OR ALTER TRIGGER dbo.TR_tblMatchStats_NineCoins
+ON dbo.tblMatchStats
+AFTER INSERT, UPDATE
+AS
+BEGIN
+    SET NOCOUNT ON;
+
+    IF EXISTS (
+        SELECT 1
+        FROM inserted AS entered
+        INNER JOIN dbo.tblMatches AS m ON m.Id = entered.MatchId
+        LEFT JOIN dbo.tblPlayersSeasonsTeams AS pst
+            ON pst.PlayerId = entered.PlayerId
+           AND pst.SeasonId = m.SeasonId
+           AND pst.Void = 0
+           AND pst.TeamId IN (m.Team1, m.Team2)
+        WHERE entered.Void = 0
+          AND pst.PlayerId IS NULL
+    )
+    BEGIN
+        THROW 50020, 'A scorecard player must belong to one of the two teams in the match.', 1;
+    END;
+
+    DECLARE @overflow INT = 0;
+
+    ;WITH sides AS (
+        SELECT
+            m.Id AS MatchId,
+            pst.TeamId,
+            SUM(ISNULL(ms.CoinsPocketed, 0)) AS OwnCoins,
+            SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoins,
+            SUM(ISNULL(ms.CoinsFined, 0)) AS FinedCoins
+        FROM dbo.tblMatches AS m
+        INNER JOIN dbo.tblMatchStats AS ms ON ms.MatchId = m.Id AND ms.Void = 0
+        INNER JOIN dbo.tblPlayersSeasonsTeams AS pst
+            ON pst.PlayerId = ms.PlayerId
+           AND pst.SeasonId = m.SeasonId
+           AND pst.Void = 0
+        WHERE m.Id IN (SELECT DISTINCT MatchId FROM inserted)
+          AND pst.TeamId IN (m.Team1, m.Team2)
+        GROUP BY m.Id, pst.TeamId
+    )
+    SELECT @overflow = COUNT(*)
+    FROM sides AS mine
+    LEFT JOIN sides AS theirs
+        ON theirs.MatchId = mine.MatchId
+       AND theirs.TeamId <> mine.TeamId
+    WHERE CASE WHEN mine.OwnCoins > mine.FinedCoins THEN mine.OwnCoins - mine.FinedCoins ELSE 0 END
+        + ISNULL(theirs.OpponentCoins, 0) > 9;
+
+    IF @overflow > 0
+    BEGIN
+        THROW 50021, 'Each colour has only 9 coins off the board after fines.', 1;
+    END;
+END;
+GO
+
 -- Seed data follows table dependency order.
 
 IF NOT EXISTS (SELECT 1 FROM dbo.[tblCountries])
@@ -626,7 +686,12 @@ BEGIN
     SET NOCOUNT ON;
     SET @p_Limit = CASE WHEN @p_Limit IS NULL OR @p_Limit <= 0 THEN 3 ELSE @p_Limit END;
     SELECT TOP (@p_Limit) ms.PlayerId, p.FirstName, p.LastName, p.AvatarUrl, pst.TeamId, t.Name AS TeamName,
-        SUM(ISNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed, SUM(ISNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(ISNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed,
+        SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoinsPocketed,
+        SUM(ISNULL(ms.SingleFines, 0)) AS SingleFines,
+        SUM(ISNULL(ms.DoubleFines, 0)) AS DoubleFines,
+        SUM(ISNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(ISNULL(ms.CoinsPocketed, 0)) - SUM(ISNULL(ms.CoinsFined, 0)) AS NetCoins,
         SUM(ISNULL(ms.StrikersPocketed, 0)) AS StrikersPocketed
     FROM dbo.tblMatchStats ms
     JOIN dbo.tblMatches m ON m.Id = ms.MatchId AND m.Void = 0
@@ -635,7 +700,8 @@ BEGIN
     LEFT JOIN dbo.tblTeams t ON t.Id = pst.TeamId AND t.Void = 0
     WHERE m.SeasonId = @p_SeasonId AND m.Category = 1 AND m.Status = 3 AND ms.Void = 0
     GROUP BY ms.PlayerId, p.FirstName, p.LastName, p.AvatarUrl, pst.TeamId, t.Name
-    ORDER BY CoinsPocketed DESC, CoinsFined ASC, StrikersPocketed ASC, p.FirstName ASC, p.LastName ASC;
+    ORDER BY NetCoins DESC, CoinsPocketed DESC, DoubleFines ASC, SingleFines ASC, OpponentCoinsPocketed ASC,
+        StrikersPocketed ASC, p.FirstName ASC, p.LastName ASC, ms.PlayerId ASC;
 END
 GO
 

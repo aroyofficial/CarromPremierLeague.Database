@@ -419,7 +419,12 @@ BEGIN
     SET NOCOUNT ON;
     SET @p_Limit = CASE WHEN @p_Limit IS NULL OR @p_Limit <= 0 THEN 3 ELSE @p_Limit END;
     SELECT TOP (@p_Limit) ms.PlayerId, p.FirstName, p.LastName, p.AvatarUrl, pst.TeamId, t.Name AS TeamName,
-        SUM(ISNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed, SUM(ISNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(ISNULL(ms.CoinsPocketed, 0)) AS CoinsPocketed,
+        SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoinsPocketed,
+        SUM(ISNULL(ms.SingleFines, 0)) AS SingleFines,
+        SUM(ISNULL(ms.DoubleFines, 0)) AS DoubleFines,
+        SUM(ISNULL(ms.CoinsFined, 0)) AS CoinsFined,
+        SUM(ISNULL(ms.CoinsPocketed, 0)) - SUM(ISNULL(ms.CoinsFined, 0)) AS NetCoins,
         SUM(ISNULL(ms.StrikersPocketed, 0)) AS StrikersPocketed
     FROM dbo.tblMatchStats ms
     JOIN dbo.tblMatches m ON m.Id = ms.MatchId AND m.Void = 0
@@ -428,7 +433,8 @@ BEGIN
     LEFT JOIN dbo.tblTeams t ON t.Id = pst.TeamId AND t.Void = 0
     WHERE m.SeasonId = @p_SeasonId AND m.Category = 1 AND m.Status = 3 AND ms.Void = 0
     GROUP BY ms.PlayerId, p.FirstName, p.LastName, p.AvatarUrl, pst.TeamId, t.Name
-    ORDER BY CoinsPocketed DESC, CoinsFined ASC, StrikersPocketed ASC, p.FirstName ASC, p.LastName ASC;
+    ORDER BY NetCoins DESC, CoinsPocketed DESC, DoubleFines ASC, SingleFines ASC, OpponentCoinsPocketed ASC,
+        StrikersPocketed ASC, p.FirstName ASC, p.LastName ASC, ms.PlayerId ASC;
 END
 GO
 '@
