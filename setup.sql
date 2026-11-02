@@ -189,6 +189,9 @@ CREATE TABLE dbo.tblMatchStats (
     MatchId BIGINT NOT NULL,
     PlayerId BIGINT NOT NULL,
     CoinsPocketed TINYINT NULL,
+    OpponentCoinsPocketed TINYINT NULL,
+    SingleFines TINYINT NULL,
+    DoubleFines TINYINT NULL,
     StrikersPocketed TINYINT NULL,
     CoinsFined TINYINT NULL,
     ShotsTaken TINYINT NULL,
@@ -196,6 +199,18 @@ CREATE TABLE dbo.tblMatchStats (
     CONSTRAINT FK_tblMatchStats_tblMatches FOREIGN KEY (MatchId) REFERENCES dbo.tblMatches(Id),
     CONSTRAINT FK_tblMatchStats_tblPlayers FOREIGN KEY (PlayerId) REFERENCES dbo.tblPlayers(Id)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblMatchStats', N'OpponentCoinsPocketed') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD OpponentCoinsPocketed TINYINT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblMatchStats', N'SingleFines') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD SingleFines TINYINT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblMatchStats', N'DoubleFines') IS NULL
+    ALTER TABLE dbo.tblMatchStats ADD DoubleFines TINYINT NULL;
 GO
 
 -- Seed data follows table dependency order.
