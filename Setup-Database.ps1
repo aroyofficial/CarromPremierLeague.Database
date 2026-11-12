@@ -483,8 +483,17 @@ BEGIN
     TeamStats AS (
         SELECT t.Id AS TeamId, t.Name AS TeamName, COUNT(lm.Id) AS MatchesPlayed,
             SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 1 ELSE 0 END) AS Wins,
-            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2 ELSE 0 END) AS Points,
-            SUM(CASE WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0) ELSE 0 END) AS TotalNetPoints
+            SUM(CASE WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1 ELSE 0 END) AS Draws,
+            SUM(CASE
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN 2
+                WHEN lm.Id IS NOT NULL AND lm.Outcome = 3 THEN 1
+                ELSE 0
+            END) AS Points,
+            SUM(CASE
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 1) OR (lm.Team2 = t.Id AND lm.Outcome = 2) THEN ISNULL(lm.NetPoints, 0)
+                WHEN (lm.Team1 = t.Id AND lm.Outcome = 2) OR (lm.Team2 = t.Id AND lm.Outcome = 1) THEN -ISNULL(lm.NetPoints, 0)
+                ELSE 0
+            END) AS TotalNetPoints
         FROM SeasonTeams st
         JOIN dbo.tblTeams t ON t.Id = st.TeamId AND t.Void = 0
         LEFT JOIN LeagueMatches lm ON t.Id IN (lm.Team1, lm.Team2)
@@ -498,10 +507,16 @@ BEGIN
                AND opponent.Points = ts.Points AND opponent.TotalNetPoints = ts.TotalNetPoints) AS HeadToHeadWins,
             (SELECT COUNT(*) FROM dbo.tblMatches gs
              WHERE gs.SeasonId = @p_SeasonId AND gs.Category = 7 AND gs.GoldenStrike = 1 AND gs.Status = 3 AND gs.Void = 0
-               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))) AS GoldenStrikeWins
+               AND ((gs.Team1 = ts.TeamId AND gs.Outcome = 1) OR (gs.Team2 = ts.TeamId AND gs.Outcome = 2))
+               AND NOT EXISTS (
+                   SELECT 1 FROM dbo.tblMatches ko
+                   WHERE ko.SeasonId = gs.SeasonId AND ko.Void = 0 AND ko.Status = 3 AND ko.Outcome = 3
+                     AND ko.Category IN (2, 3) AND ko.[Order] < gs.[Order]
+                     AND ((ko.Team1 = gs.Team1 AND ko.Team2 = gs.Team2) OR (ko.Team1 = gs.Team2 AND ko.Team2 = gs.Team1))
+               )) AS GoldenStrikeWins
         FROM TeamStats ts
     )
-    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Points, rs.TotalNetPoints,
+    SELECT rs.TeamId, rs.TeamName, rs.MatchesPlayed, rs.Wins, rs.Draws, rs.Points, rs.TotalNetPoints,
         rs.HeadToHeadWins, rs.GoldenStrikeWins, CASE WHEN rs.TeamId = @WinnerTeamId THEN 1 ELSE 0 END AS IsWinner
     FROM RankedStats rs
     ORDER BY rs.Points DESC, rs.TotalNetPoints DESC, rs.HeadToHeadWins DESC, rs.GoldenStrikeWins DESC, rs.TeamId ASC;
