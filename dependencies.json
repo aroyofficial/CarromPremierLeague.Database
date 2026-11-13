@@ -26,6 +26,12 @@
 		},
 		"tblMatchStats": {
 			"tables": ["tblMatches", "tblPlayers"]
+		},
+		"tblPermissions": {
+			"tables": []
+		},
+		"tblAdminPermissions": {
+			"tables": ["tblAdmins", "tblPermissions"]
 		}
 	},
 	"functions": {},

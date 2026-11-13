@@ -350,6 +350,80 @@ IF NOT EXISTS (SELECT 1 FROM dbo.tblSettings WHERE Id = 1)
 INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover)
 VALUES (1, 15, 5, 0, 0);
 GO
+
+IF OBJECT_ID(N'dbo.tblPermissions', N'U') IS NULL
+CREATE TABLE dbo.tblPermissions (
+    Code VARCHAR(64) NOT NULL CONSTRAINT PK_tblPermissions PRIMARY KEY,
+    Area NVARCHAR(50) NOT NULL,
+    Name NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissions_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissions_UpdatedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblAdminPermissions', N'U') IS NULL
+CREATE TABLE dbo.tblAdminPermissions (
+    AdminId BIGINT NOT NULL,
+    PermissionCode VARCHAR(64) NOT NULL,
+    GrantedBy BIGINT NULL,
+    GrantedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminPermissions_GrantedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT PK_tblAdminPermissions PRIMARY KEY (AdminId, PermissionCode),
+    CONSTRAINT FK_tblAdminPermissions_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT FK_tblAdminPermissions_tblPermissions FOREIGN KEY (PermissionCode) REFERENCES dbo.tblPermissions(Code),
+    CONSTRAINT FK_tblAdminPermissions_GrantedBy FOREIGN KEY (GrantedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblAdminPermissions_PermissionCode' AND object_id = OBJECT_ID(N'dbo.tblAdminPermissions'))
+    CREATE INDEX IX_tblAdminPermissions_PermissionCode ON dbo.tblAdminPermissions (PermissionCode, AdminId);
+GO
+
+-- Keep in step with CarromPremierLeague.API core/permissions.py, which upserts the same rows on startup.
+MERGE dbo.tblPermissions AS target
+USING (VALUES
+    ('seasons.create', N'Seasons', N'Create seasons', N'Add a new season.', 10),
+    ('seasons.update', N'Seasons', N'Edit seasons', N'Change season names, dates and public visibility.', 20),
+    ('seasons.delete', N'Seasons', N'Delete seasons', N'Remove a season.', 30),
+    ('seasons.teams', N'Seasons', N'Choose season teams', N'Add teams to a season or remove them.', 40),
+    ('teams.create', N'Teams', N'Create teams', N'Add a new team.', 110),
+    ('teams.update', N'Teams', N'Edit teams', N'Change team names, slogans and logos.', 120),
+    ('teams.delete', N'Teams', N'Delete teams', N'Remove a team.', 130),
+    ('players.create', N'Players', N'Create players', N'Add a new player profile.', 210),
+    ('players.update', N'Players', N'Edit players', N'Change player profiles and photos.', 220),
+    ('players.delete', N'Players', N'Delete players', N'Remove a player profile.', 230),
+    ('countries.create', N'Countries', N'Create countries', N'Add a nationality to the reference list.', 310),
+    ('countries.update', N'Countries', N'Edit countries', N'Change a country name or flag.', 320),
+    ('countries.delete', N'Countries', N'Delete countries', N'Remove a country.', 330),
+    ('rosters.manage', N'Rosters', N'Manage rosters', N'Assign players to teams for a season and remove them.', 410),
+    ('matches.create', N'Matches', N'Create matches', N'Schedule new fixtures.', 510),
+    ('matches.update', N'Matches', N'Edit and run matches', N'Change fixture details, call the toss and run a match live.', 520),
+    ('matches.scorecard', N'Matches', N'Save scorecards', N'Save player statistics for a match.', 530),
+    ('matches.reset', N'Matches', N'Reset matches', N'Return a started or played match to scheduled.', 540),
+    ('matches.delete', N'Matches', N'Delete matches', N'Remove a fixture.', 550),
+    ('settings.update', N'Settings', N'Change competition settings', N'Set the match clock and the Queen rules.', 610),
+    ('admins.view', N'Admin users', N'View admin users', N'See the list of admin users and what each can do.', 710),
+    ('admins.create', N'Admin users', N'Create admin users', N'Add a new admin user.', 720),
+    ('admins.update', N'Admin users', N'Edit admin users', N'Rename other admins, reset their passwords and turn accounts on or off.', 730),
+    ('admins.delete', N'Admin users', N'Delete admin users', N'Remove another admin user.', 740),
+    ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810)
+) AS source (Code, Area, Name, Description, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.Area <> source.Area OR target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET Area = source.Area, Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, Area, Name, Description, SortOrder) VALUES (source.Code, source.Area, source.Name, source.Description, source.SortOrder);
+GO
+
+-- Bootstrap only: when nobody holds any permission, the seed admin receives all of them.
+IF NOT EXISTS (SELECT 1 FROM dbo.tblAdminPermissions)
+INSERT INTO dbo.tblAdminPermissions (AdminId, PermissionCode)
+SELECT a.Id, p.Code
+FROM dbo.tblAdmins a
+CROSS JOIN dbo.tblPermissions p
+WHERE a.Username = N'admin' AND a.Void = 0;
+GO
 '@
 
 $proceduresSql = @'
