@@ -330,6 +330,26 @@ CREATE TABLE dbo.tblMatchStats (
     CONSTRAINT FK_tblMatchStats_tblPlayers FOREIGN KEY (PlayerId) REFERENCES dbo.tblPlayers(Id)
 );
 GO
+
+IF OBJECT_ID(N'dbo.tblSettings', N'U') IS NULL
+CREATE TABLE dbo.tblSettings (
+    Id TINYINT NOT NULL CONSTRAINT PK_tblSettings PRIMARY KEY,
+    RegulationMinutes INT NOT NULL CONSTRAINT DF_tblSettings_RegulationMinutes DEFAULT 15,
+    ExtraMinutes INT NOT NULL CONSTRAINT DF_tblSettings_ExtraMinutes DEFAULT 5,
+    LeagueQueen BIT NOT NULL CONSTRAINT DF_tblSettings_LeagueQueen DEFAULT 0,
+    QueenNeedsCover BIT NOT NULL CONSTRAINT DF_tblSettings_QueenNeedsCover DEFAULT 0,
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSettings_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_tblSettings_SingleRow CHECK (Id = 1),
+    CONSTRAINT CK_tblSettings_RegulationMinutes CHECK (RegulationMinutes BETWEEN 5 AND 30),
+    CONSTRAINT CK_tblSettings_ExtraMinutes CHECK (ExtraMinutes BETWEEN 1 AND 10),
+    CONSTRAINT CK_tblSettings_QueenCover CHECK (LeagueQueen = 1 OR QueenNeedsCover = 0)
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM dbo.tblSettings WHERE Id = 1)
+INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover)
+VALUES (1, 15, 5, 0, 0);
+GO
 '@
 
 $proceduresSql = @'
