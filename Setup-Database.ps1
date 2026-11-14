@@ -361,6 +361,57 @@ INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, Q
 VALUES (1, 15, 5, 0, 0);
 GO
 
+
+-- Season gallery. A photo can belong to several seasons. New photos stay unpublished until a curator publishes them.
+IF OBJECT_ID(N'dbo.tblGalleryItems', N'U') IS NULL
+CREATE TABLE dbo.tblGalleryItems (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblGalleryItems PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblGalleryItems_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblGalleryItems_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblGalleryItems_Void DEFAULT 0,
+    SourceType VARCHAR(16) NOT NULL,
+    Url NVARCHAR(2048) NOT NULL,
+    StorageKey NVARCHAR(512) NULL,
+    Width INT NOT NULL,
+    Height INT NOT NULL,
+    Caption NVARCHAR(500) NULL,
+    AltText NVARCHAR(300) NULL,
+    TakenOn DATE NULL,
+    IsPublished BIT NOT NULL CONSTRAINT DF_tblGalleryItems_IsPublished DEFAULT 0,
+    CreatedBy BIGINT NULL,
+    UpdatedBy BIGINT NULL,
+    CONSTRAINT CK_tblGalleryItems_SourceType CHECK (SourceType IN ('upload', 'link')),
+    CONSTRAINT CK_tblGalleryItems_Size CHECK (Width > 0 AND Height > 0),
+    CONSTRAINT FK_tblGalleryItems_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT FK_tblGalleryItems_UpdatedBy FOREIGN KEY (UpdatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblGalleryItems_Published' AND object_id = OBJECT_ID(N'dbo.tblGalleryItems'))
+    CREATE INDEX IX_tblGalleryItems_Published ON dbo.tblGalleryItems (IsPublished, Void, Id);
+GO
+
+IF OBJECT_ID(N'dbo.tblGalleryItemSeasons', N'U') IS NULL
+CREATE TABLE dbo.tblGalleryItemSeasons (
+    ItemId BIGINT NOT NULL,
+    SeasonId BIGINT NOT NULL,
+    SortOrder INT NOT NULL CONSTRAINT DF_tblGalleryItemSeasons_SortOrder DEFAULT 0,
+    IsCover BIT NOT NULL CONSTRAINT DF_tblGalleryItemSeasons_IsCover DEFAULT 0,
+    CONSTRAINT PK_tblGalleryItemSeasons PRIMARY KEY (ItemId, SeasonId),
+    CONSTRAINT FK_tblGalleryItemSeasons_Items FOREIGN KEY (ItemId) REFERENCES dbo.tblGalleryItems(Id),
+    CONSTRAINT FK_tblGalleryItemSeasons_Seasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id)
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UX_tblGalleryItemSeasons_Cover' AND object_id = OBJECT_ID(N'dbo.tblGalleryItemSeasons'))
+    CREATE UNIQUE INDEX UX_tblGalleryItemSeasons_Cover ON dbo.tblGalleryItemSeasons (SeasonId) WHERE IsCover = 1;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblGalleryItemSeasons_SeasonOrder' AND object_id = OBJECT_ID(N'dbo.tblGalleryItemSeasons'))
+    CREATE INDEX IX_tblGalleryItemSeasons_SeasonOrder ON dbo.tblGalleryItemSeasons (SeasonId, SortOrder, ItemId);
+GO
+
+
 IF OBJECT_ID(N'dbo.tblPermissions', N'U') IS NULL
 CREATE TABLE dbo.tblPermissions (
     Code VARCHAR(64) NOT NULL CONSTRAINT PK_tblPermissions PRIMARY KEY,
@@ -417,7 +468,11 @@ USING (VALUES
     ('admins.create', N'Admin users', N'Create admin users', N'Add a new admin user.', 720),
     ('admins.update', N'Admin users', N'Edit admin users', N'Rename other admins, reset their passwords and turn accounts on or off.', 730),
     ('admins.delete', N'Admin users', N'Delete admin users', N'Remove another admin user.', 740),
-    ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810)
+    ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810),
+    ('gallery.create', N'Gallery', N'Add gallery photos', N'Upload a photo or save a public image link as a draft.', 650),
+    ('gallery.update', N'Gallery', N'Edit gallery photos', N'Change captions, seasons, order and covers.', 660),
+    ('gallery.publish', N'Gallery', N'Publish gallery photos', N'Make a draft photo visible on the public gallery.', 670),
+    ('gallery.delete', N'Gallery', N'Delete gallery photos', N'Remove a photo from the gallery.', 680)
 ) AS source (Code, Area, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Area <> source.Area OR target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -504,6 +559,7 @@ MERGE dbo.tblPermissionSections AS target
 USING (VALUES
     ('league', N'League setup', N'Seasons, teams, players and who plays where.', 10),
     ('matchday', N'Match day', N'Fixtures, live scoring and competition rules.', 20),
+    ('media', N'Media', N'Season photos shown on the public gallery.', 25),
     ('administration', N'Administration', N'Who can sign in and what they can do.', 30)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
@@ -523,6 +579,7 @@ USING (VALUES
     ('matches', 'matchday', N'Matches', N'Fixtures, tosses, live play and scorecards.', 'Trophy', 60),
     ('settings', 'matchday', N'Settings', N'Match clock and Queen rules.', 'Setting', 70),
     ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
+    ('gallery', 'media', N'Gallery', N'Season photos.', 'Picture', 55),
     ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90)
 ) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
     ON target.Code = source.Code
@@ -560,7 +617,11 @@ JOIN (VALUES
     ('admins.create', 'admins', NULL),
     ('admins.update', 'admins', 'admins.view'),
     ('admins.delete', 'admins', 'admins.view'),
-    ('permissions.manage', 'permissions', NULL)
+    ('permissions.manage', 'permissions', NULL),
+    ('gallery.create', 'gallery', NULL),
+    ('gallery.update', 'gallery', NULL),
+    ('gallery.publish', 'gallery', 'gallery.update'),
+    ('gallery.delete', 'gallery', 'gallery.update')
 ) AS source (Code, AreaCode, ParentCode)
     ON p.Code = source.Code
 WHERE ISNULL(p.AreaCode, '') <> source.AreaCode OR ISNULL(p.ParentCode, '') <> ISNULL(source.ParentCode, '');
@@ -571,7 +632,8 @@ USING (VALUES
     ('match_day', N'Match day operator', N'Runs matches live, saves scorecards and can reset a match.', 10),
     ('season_planner', N'Season planner', N'Sets up seasons, picks their teams, fills rosters and schedules fixtures.', 20),
     ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
-    ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40)
+    ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40),
+    ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -599,12 +661,16 @@ USING (VALUES
     ('content_editor', 'rosters.manage'),
     ('account_manager', 'admins.view'),
     ('account_manager', 'admins.create'),
-    ('account_manager', 'admins.update')
+    ('account_manager', 'admins.update'),
+    ('gallery_curator', 'gallery.create'),
+    ('gallery_curator', 'gallery.update'),
+    ('gallery_curator', 'gallery.publish'),
+    ('gallery_curator', 'gallery.delete')
 ) AS source (RoleCode, PermissionCode)
     ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
-WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager') THEN
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator') THEN
     DELETE;
 GO
 
@@ -617,6 +683,18 @@ WHERE p.ParentCode IS NOT NULL
   AND NOT EXISTS (
       SELECT 1 FROM dbo.tblAdminPermissions held
       WHERE held.AdminId = ap.AdminId AND held.PermissionCode = p.ParentCode
+  );
+GO
+
+-- The seed admin keeps every catalog permission, including ones added after the first bootstrap.
+INSERT INTO dbo.tblAdminPermissions (AdminId, PermissionCode)
+SELECT a.Id, p.Code
+FROM dbo.tblAdmins a
+CROSS JOIN dbo.tblPermissions p
+WHERE a.Username = N'admin' AND a.Void = 0
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.tblAdminPermissions held
+      WHERE held.AdminId = a.Id AND held.PermissionCode = p.Code
   );
 GO
 '@

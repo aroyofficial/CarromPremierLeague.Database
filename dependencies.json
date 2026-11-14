@@ -44,6 +44,12 @@
 		},
 		"tblRolePermissions": {
 			"tables": ["tblRoles", "tblPermissions"]
+		},
+		"tblGalleryItems": {
+			"tables": ["tblAdmins"]
+		},
+		"tblGalleryItemSeasons": {
+			"tables": ["tblGalleryItems", "tblSeasons"]
 		}
 	},
 	"functions": {},
