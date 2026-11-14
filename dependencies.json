@@ -27,11 +27,23 @@
 		"tblMatchStats": {
 			"tables": ["tblMatches", "tblPlayers"]
 		},
-		"tblPermissions": {
+		"tblPermissionSections": {
 			"tables": []
+		},
+		"tblPermissionAreas": {
+			"tables": ["tblPermissionSections"]
+		},
+		"tblPermissions": {
+			"tables": ["tblPermissionAreas"]
 		},
 		"tblAdminPermissions": {
 			"tables": ["tblAdmins", "tblPermissions"]
+		},
+		"tblRoles": {
+			"tables": []
+		},
+		"tblRolePermissions": {
+			"tables": ["tblRoles", "tblPermissions"]
 		}
 	},
 	"functions": {},

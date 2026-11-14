@@ -52,3 +52,20 @@ SET @sql = (
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+-- LogoStorageKey column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblTeams ADD COLUMN LogoStorageKey VARCHAR(512) NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'LogoStorageKey'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

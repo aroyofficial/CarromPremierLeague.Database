@@ -227,8 +227,13 @@ CREATE TABLE dbo.tblTeams (
     Void BIT NOT NULL CONSTRAINT DF_tblTeams_Void DEFAULT 0,
     Name NVARCHAR(255) NOT NULL,
     Slogan NVARCHAR(500) NULL,
-    LogoUrl NVARCHAR(2048) NULL
+    LogoUrl NVARCHAR(2048) NULL,
+    LogoStorageKey NVARCHAR(512) NULL
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblTeams', N'LogoStorageKey') IS NULL
+    ALTER TABLE dbo.tblTeams ADD LogoStorageKey NVARCHAR(512) NULL;
 GO
 
 IF OBJECT_ID(N'dbo.tblSeasonsTeams', N'U') IS NULL
@@ -255,6 +260,7 @@ CREATE TABLE dbo.tblPlayers (
     LastName NVARCHAR(255) NOT NULL,
     DateOfBirth DATE NULL,
     AvatarUrl NVARCHAR(2048) NULL,
+    AvatarStorageKey NVARCHAR(512) NULL,
     NationalityId BIGINT NULL,
     DebutSeasonId BIGINT NULL,
     CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id),
@@ -264,6 +270,10 @@ GO
 
 IF COL_LENGTH(N'dbo.tblPlayers', N'DebutSeasonId') IS NULL
     ALTER TABLE dbo.tblPlayers ADD DebutSeasonId BIGINT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPlayers', N'AvatarStorageKey') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD AvatarStorageKey NVARCHAR(512) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_tblPlayers_tblSeasons_Debut')
@@ -423,6 +433,191 @@ SELECT a.Id, p.Code
 FROM dbo.tblAdmins a
 CROSS JOIN dbo.tblPermissions p
 WHERE a.Username = N'admin' AND a.Void = 0;
+GO
+
+-- Permission hierarchy: sections hold areas, areas hold permissions, and a child permission needs its parent.
+-- Keep in step with CarromPremierLeague.API core/permissions.py, which upserts the same rows on startup.
+IF OBJECT_ID(N'dbo.tblPermissionSections', N'U') IS NULL
+CREATE TABLE dbo.tblPermissionSections (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblPermissionSections PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionSections_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionSections_UpdatedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblPermissionAreas', N'U') IS NULL
+CREATE TABLE dbo.tblPermissionAreas (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblPermissionAreas PRIMARY KEY,
+    SectionCode VARCHAR(32) NOT NULL,
+    Name NVARCHAR(50) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    Icon VARCHAR(40) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionAreas_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionAreas_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblPermissionAreas_tblPermissionSections FOREIGN KEY (SectionCode) REFERENCES dbo.tblPermissionSections(Code)
+);
+GO
+
+IF COL_LENGTH(N'dbo.tblPermissions', N'AreaCode') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD AreaCode VARCHAR(32) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPermissions', N'ParentCode') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD ParentCode VARCHAR(64) NULL;
+GO
+
+IF OBJECT_ID(N'dbo.FK_tblPermissions_tblPermissionAreas', N'F') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD CONSTRAINT FK_tblPermissions_tblPermissionAreas FOREIGN KEY (AreaCode) REFERENCES dbo.tblPermissionAreas(Code);
+GO
+
+IF OBJECT_ID(N'dbo.FK_tblPermissions_Parent', N'F') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD CONSTRAINT FK_tblPermissions_Parent FOREIGN KEY (ParentCode) REFERENCES dbo.tblPermissions(Code);
+GO
+
+-- Roles are ready-made permission sets the console applies in one click. Admins hold permissions, not roles.
+IF OBJECT_ID(N'dbo.tblRoles', N'U') IS NULL
+CREATE TABLE dbo.tblRoles (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblRoles PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblRoles_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblRoles_UpdatedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblRolePermissions', N'U') IS NULL
+CREATE TABLE dbo.tblRolePermissions (
+    RoleCode VARCHAR(32) NOT NULL,
+    PermissionCode VARCHAR(64) NOT NULL,
+    CONSTRAINT PK_tblRolePermissions PRIMARY KEY (RoleCode, PermissionCode),
+    CONSTRAINT FK_tblRolePermissions_tblRoles FOREIGN KEY (RoleCode) REFERENCES dbo.tblRoles(Code) ON DELETE CASCADE,
+    CONSTRAINT FK_tblRolePermissions_tblPermissions FOREIGN KEY (PermissionCode) REFERENCES dbo.tblPermissions(Code)
+);
+GO
+
+MERGE dbo.tblPermissionSections AS target
+USING (VALUES
+    ('league', N'League setup', N'Seasons, teams, players and who plays where.', 10),
+    ('matchday', N'Match day', N'Fixtures, live scoring and competition rules.', 20),
+    ('administration', N'Administration', N'Who can sign in and what they can do.', 30)
+) AS source (Code, Name, Description, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, Name, Description, SortOrder) VALUES (source.Code, source.Name, source.Description, source.SortOrder);
+GO
+
+MERGE dbo.tblPermissionAreas AS target
+USING (VALUES
+    ('seasons', 'league', N'Seasons', N'Season calendar and the teams taking part.', 'Calendar', 10),
+    ('teams', 'league', N'Teams', N'Team profiles and logos.', 'Flag', 20),
+    ('players', 'league', N'Players', N'Player profiles and photos.', 'User', 30),
+    ('countries', 'league', N'Countries', N'Nationalities players can pick from.', 'Location', 40),
+    ('rosters', 'league', N'Rosters', N'Which players play for which team each season.', 'List', 50),
+    ('matches', 'matchday', N'Matches', N'Fixtures, tosses, live play and scorecards.', 'Trophy', 60),
+    ('settings', 'matchday', N'Settings', N'Match clock and Queen rules.', 'Setting', 70),
+    ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
+    ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90)
+) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET SectionCode = source.SectionCode, Name = source.Name, Description = source.Description, Icon = source.Icon, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, SectionCode, Name, Description, Icon, SortOrder) VALUES (source.Code, source.SectionCode, source.Name, source.Description, source.Icon, source.SortOrder);
+GO
+
+UPDATE p
+SET AreaCode = source.AreaCode, ParentCode = source.ParentCode, UpdatedAt = SYSUTCDATETIME()
+FROM dbo.tblPermissions p
+JOIN (VALUES
+    ('seasons.create', 'seasons', NULL),
+    ('seasons.update', 'seasons', NULL),
+    ('seasons.delete', 'seasons', 'seasons.update'),
+    ('seasons.teams', 'seasons', 'seasons.update'),
+    ('teams.create', 'teams', NULL),
+    ('teams.update', 'teams', NULL),
+    ('teams.delete', 'teams', 'teams.update'),
+    ('players.create', 'players', NULL),
+    ('players.update', 'players', NULL),
+    ('players.delete', 'players', 'players.update'),
+    ('countries.create', 'countries', NULL),
+    ('countries.update', 'countries', NULL),
+    ('countries.delete', 'countries', 'countries.update'),
+    ('rosters.manage', 'rosters', NULL),
+    ('matches.create', 'matches', NULL),
+    ('matches.update', 'matches', NULL),
+    ('matches.scorecard', 'matches', 'matches.update'),
+    ('matches.reset', 'matches', 'matches.update'),
+    ('matches.delete', 'matches', 'matches.update'),
+    ('settings.update', 'settings', NULL),
+    ('admins.view', 'admins', NULL),
+    ('admins.create', 'admins', NULL),
+    ('admins.update', 'admins', 'admins.view'),
+    ('admins.delete', 'admins', 'admins.view'),
+    ('permissions.manage', 'permissions', NULL)
+) AS source (Code, AreaCode, ParentCode)
+    ON p.Code = source.Code
+WHERE ISNULL(p.AreaCode, '') <> source.AreaCode OR ISNULL(p.ParentCode, '') <> ISNULL(source.ParentCode, '');
+GO
+
+MERGE dbo.tblRoles AS target
+USING (VALUES
+    ('match_day', N'Match day operator', N'Runs matches live, saves scorecards and can reset a match.', 10),
+    ('season_planner', N'Season planner', N'Sets up seasons, picks their teams, fills rosters and schedules fixtures.', 20),
+    ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
+    ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40)
+) AS source (Code, Name, Description, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, Name, Description, SortOrder) VALUES (source.Code, source.Name, source.Description, source.SortOrder);
+GO
+
+MERGE dbo.tblRolePermissions AS target
+USING (VALUES
+    ('match_day', 'matches.update'),
+    ('match_day', 'matches.scorecard'),
+    ('match_day', 'matches.reset'),
+    ('season_planner', 'seasons.create'),
+    ('season_planner', 'seasons.update'),
+    ('season_planner', 'seasons.teams'),
+    ('season_planner', 'rosters.manage'),
+    ('season_planner', 'matches.create'),
+    ('content_editor', 'teams.create'),
+    ('content_editor', 'teams.update'),
+    ('content_editor', 'players.create'),
+    ('content_editor', 'players.update'),
+    ('content_editor', 'countries.create'),
+    ('content_editor', 'countries.update'),
+    ('content_editor', 'rosters.manage'),
+    ('account_manager', 'admins.view'),
+    ('account_manager', 'admins.create'),
+    ('account_manager', 'admins.update')
+) AS source (RoleCode, PermissionCode)
+    ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager') THEN
+    DELETE;
+GO
+
+-- A child permission needs its parent: give the parent to anyone who holds a child without it.
+INSERT INTO dbo.tblAdminPermissions (AdminId, PermissionCode)
+SELECT DISTINCT ap.AdminId, p.ParentCode
+FROM dbo.tblAdminPermissions ap
+JOIN dbo.tblPermissions p ON p.Code = ap.PermissionCode
+WHERE p.ParentCode IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.tblAdminPermissions held
+      WHERE held.AdminId = ap.AdminId AND held.PermissionCode = p.ParentCode
+  );
 GO
 '@
 

@@ -104,3 +104,20 @@ SET @sql = (
 PREPARE stmt FROM @sql;
 EXECUTE stmt;
 DEALLOCATE PREPARE stmt;
+
+-- AvatarStorageKey column
+SET @sql = (
+    SELECT IF(
+        COUNT(*) = 0,
+        'ALTER TABLE tblPlayers ADD COLUMN AvatarStorageKey VARCHAR(512) NULL;',
+        'DO 0;'
+    )
+    FROM INFORMATION_SCHEMA.COLUMNS
+    WHERE TABLE_SCHEMA = DATABASE()
+      AND TABLE_NAME = @tableName
+      AND COLUMN_NAME = 'AvatarStorageKey'
+);
+
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;

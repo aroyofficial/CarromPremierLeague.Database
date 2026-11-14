@@ -86,8 +86,13 @@ CREATE TABLE dbo.tblTeams (
     Void BIT NOT NULL CONSTRAINT DF_tblTeams_Void DEFAULT 0,
     Name NVARCHAR(255) NOT NULL,
     Slogan NVARCHAR(500) NULL,
-    LogoUrl NVARCHAR(2048) NULL
+    LogoUrl NVARCHAR(2048) NULL,
+    LogoStorageKey NVARCHAR(512) NULL
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblTeams', N'LogoStorageKey') IS NULL
+    ALTER TABLE dbo.tblTeams ADD LogoStorageKey NVARCHAR(512) NULL;
 GO
 
 IF OBJECT_ID(N'dbo.tblSeasonsTeams', N'U') IS NULL
@@ -114,6 +119,7 @@ CREATE TABLE dbo.tblPlayers (
     LastName NVARCHAR(255) NOT NULL,
     DateOfBirth DATE NULL,
     AvatarUrl NVARCHAR(2048) NULL,
+    AvatarStorageKey NVARCHAR(512) NULL,
     NationalityId BIGINT NULL,
     DebutSeasonId BIGINT NULL,
     CONSTRAINT FK_tblPlayers_tblCountries FOREIGN KEY (NationalityId) REFERENCES dbo.tblCountries(Id),
@@ -123,6 +129,10 @@ GO
 
 IF COL_LENGTH(N'dbo.tblPlayers', N'DebutSeasonId') IS NULL
     ALTER TABLE dbo.tblPlayers ADD DebutSeasonId BIGINT NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPlayers', N'AvatarStorageKey') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD AvatarStorageKey NVARCHAR(512) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_tblPlayers_tblSeasons_Debut')
@@ -293,6 +303,191 @@ SELECT a.Id, p.Code
 FROM dbo.tblAdmins a
 CROSS JOIN dbo.tblPermissions p
 WHERE a.Username = N'admin' AND a.Void = 0;
+GO
+
+-- Permission hierarchy: sections hold areas, areas hold permissions, and a child permission needs its parent.
+-- Keep in step with CarromPremierLeague.API core/permissions.py, which upserts the same rows on startup.
+IF OBJECT_ID(N'dbo.tblPermissionSections', N'U') IS NULL
+CREATE TABLE dbo.tblPermissionSections (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblPermissionSections PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionSections_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionSections_UpdatedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblPermissionAreas', N'U') IS NULL
+CREATE TABLE dbo.tblPermissionAreas (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblPermissionAreas PRIMARY KEY,
+    SectionCode VARCHAR(32) NOT NULL,
+    Name NVARCHAR(50) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    Icon VARCHAR(40) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionAreas_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPermissionAreas_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblPermissionAreas_tblPermissionSections FOREIGN KEY (SectionCode) REFERENCES dbo.tblPermissionSections(Code)
+);
+GO
+
+IF COL_LENGTH(N'dbo.tblPermissions', N'AreaCode') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD AreaCode VARCHAR(32) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPermissions', N'ParentCode') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD ParentCode VARCHAR(64) NULL;
+GO
+
+IF OBJECT_ID(N'dbo.FK_tblPermissions_tblPermissionAreas', N'F') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD CONSTRAINT FK_tblPermissions_tblPermissionAreas FOREIGN KEY (AreaCode) REFERENCES dbo.tblPermissionAreas(Code);
+GO
+
+IF OBJECT_ID(N'dbo.FK_tblPermissions_Parent', N'F') IS NULL
+    ALTER TABLE dbo.tblPermissions ADD CONSTRAINT FK_tblPermissions_Parent FOREIGN KEY (ParentCode) REFERENCES dbo.tblPermissions(Code);
+GO
+
+-- Roles are ready-made permission sets the console applies in one click. Admins hold permissions, not roles.
+IF OBJECT_ID(N'dbo.tblRoles', N'U') IS NULL
+CREATE TABLE dbo.tblRoles (
+    Code VARCHAR(32) NOT NULL CONSTRAINT PK_tblRoles PRIMARY KEY,
+    Name NVARCHAR(100) NOT NULL,
+    Description NVARCHAR(300) NOT NULL,
+    SortOrder INT NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblRoles_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblRoles_UpdatedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblRolePermissions', N'U') IS NULL
+CREATE TABLE dbo.tblRolePermissions (
+    RoleCode VARCHAR(32) NOT NULL,
+    PermissionCode VARCHAR(64) NOT NULL,
+    CONSTRAINT PK_tblRolePermissions PRIMARY KEY (RoleCode, PermissionCode),
+    CONSTRAINT FK_tblRolePermissions_tblRoles FOREIGN KEY (RoleCode) REFERENCES dbo.tblRoles(Code) ON DELETE CASCADE,
+    CONSTRAINT FK_tblRolePermissions_tblPermissions FOREIGN KEY (PermissionCode) REFERENCES dbo.tblPermissions(Code)
+);
+GO
+
+MERGE dbo.tblPermissionSections AS target
+USING (VALUES
+    ('league', N'League setup', N'Seasons, teams, players and who plays where.', 10),
+    ('matchday', N'Match day', N'Fixtures, live scoring and competition rules.', 20),
+    ('administration', N'Administration', N'Who can sign in and what they can do.', 30)
+) AS source (Code, Name, Description, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, Name, Description, SortOrder) VALUES (source.Code, source.Name, source.Description, source.SortOrder);
+GO
+
+MERGE dbo.tblPermissionAreas AS target
+USING (VALUES
+    ('seasons', 'league', N'Seasons', N'Season calendar and the teams taking part.', 'Calendar', 10),
+    ('teams', 'league', N'Teams', N'Team profiles and logos.', 'Flag', 20),
+    ('players', 'league', N'Players', N'Player profiles and photos.', 'User', 30),
+    ('countries', 'league', N'Countries', N'Nationalities players can pick from.', 'Location', 40),
+    ('rosters', 'league', N'Rosters', N'Which players play for which team each season.', 'List', 50),
+    ('matches', 'matchday', N'Matches', N'Fixtures, tosses, live play and scorecards.', 'Trophy', 60),
+    ('settings', 'matchday', N'Settings', N'Match clock and Queen rules.', 'Setting', 70),
+    ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
+    ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90)
+) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET SectionCode = source.SectionCode, Name = source.Name, Description = source.Description, Icon = source.Icon, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, SectionCode, Name, Description, Icon, SortOrder) VALUES (source.Code, source.SectionCode, source.Name, source.Description, source.Icon, source.SortOrder);
+GO
+
+UPDATE p
+SET AreaCode = source.AreaCode, ParentCode = source.ParentCode, UpdatedAt = SYSUTCDATETIME()
+FROM dbo.tblPermissions p
+JOIN (VALUES
+    ('seasons.create', 'seasons', NULL),
+    ('seasons.update', 'seasons', NULL),
+    ('seasons.delete', 'seasons', 'seasons.update'),
+    ('seasons.teams', 'seasons', 'seasons.update'),
+    ('teams.create', 'teams', NULL),
+    ('teams.update', 'teams', NULL),
+    ('teams.delete', 'teams', 'teams.update'),
+    ('players.create', 'players', NULL),
+    ('players.update', 'players', NULL),
+    ('players.delete', 'players', 'players.update'),
+    ('countries.create', 'countries', NULL),
+    ('countries.update', 'countries', NULL),
+    ('countries.delete', 'countries', 'countries.update'),
+    ('rosters.manage', 'rosters', NULL),
+    ('matches.create', 'matches', NULL),
+    ('matches.update', 'matches', NULL),
+    ('matches.scorecard', 'matches', 'matches.update'),
+    ('matches.reset', 'matches', 'matches.update'),
+    ('matches.delete', 'matches', 'matches.update'),
+    ('settings.update', 'settings', NULL),
+    ('admins.view', 'admins', NULL),
+    ('admins.create', 'admins', NULL),
+    ('admins.update', 'admins', 'admins.view'),
+    ('admins.delete', 'admins', 'admins.view'),
+    ('permissions.manage', 'permissions', NULL)
+) AS source (Code, AreaCode, ParentCode)
+    ON p.Code = source.Code
+WHERE ISNULL(p.AreaCode, '') <> source.AreaCode OR ISNULL(p.ParentCode, '') <> ISNULL(source.ParentCode, '');
+GO
+
+MERGE dbo.tblRoles AS target
+USING (VALUES
+    ('match_day', N'Match day operator', N'Runs matches live, saves scorecards and can reset a match.', 10),
+    ('season_planner', N'Season planner', N'Sets up seasons, picks their teams, fills rosters and schedules fixtures.', 20),
+    ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
+    ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40)
+) AS source (Code, Name, Description, SortOrder)
+    ON target.Code = source.Code
+WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
+    UPDATE SET Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
+WHEN NOT MATCHED THEN
+    INSERT (Code, Name, Description, SortOrder) VALUES (source.Code, source.Name, source.Description, source.SortOrder);
+GO
+
+MERGE dbo.tblRolePermissions AS target
+USING (VALUES
+    ('match_day', 'matches.update'),
+    ('match_day', 'matches.scorecard'),
+    ('match_day', 'matches.reset'),
+    ('season_planner', 'seasons.create'),
+    ('season_planner', 'seasons.update'),
+    ('season_planner', 'seasons.teams'),
+    ('season_planner', 'rosters.manage'),
+    ('season_planner', 'matches.create'),
+    ('content_editor', 'teams.create'),
+    ('content_editor', 'teams.update'),
+    ('content_editor', 'players.create'),
+    ('content_editor', 'players.update'),
+    ('content_editor', 'countries.create'),
+    ('content_editor', 'countries.update'),
+    ('content_editor', 'rosters.manage'),
+    ('account_manager', 'admins.view'),
+    ('account_manager', 'admins.create'),
+    ('account_manager', 'admins.update')
+) AS source (RoleCode, PermissionCode)
+    ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
+WHEN NOT MATCHED BY TARGET THEN
+    INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager') THEN
+    DELETE;
+GO
+
+-- A child permission needs its parent: give the parent to anyone who holds a child without it.
+INSERT INTO dbo.tblAdminPermissions (AdminId, PermissionCode)
+SELECT DISTINCT ap.AdminId, p.ParentCode
+FROM dbo.tblAdminPermissions ap
+JOIN dbo.tblPermissions p ON p.Code = ap.PermissionCode
+WHERE p.ParentCode IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.tblAdminPermissions held
+      WHERE held.AdminId = ap.AdminId AND held.PermissionCode = p.ParentCode
+  );
 GO
 
 IF COL_LENGTH(N'dbo.tblMatchStats', N'OpponentCoinsPocketed') IS NULL
@@ -643,12 +838,12 @@ BEGIN
     SET IDENTITY_INSERT dbo.[tblTeams] ON;
     INSERT INTO tblTeams (Id, Name, Slogan, LogoUrl)
 VALUES
-    (1, 'Ghoshpara Strikers', 'Roar of the Board', 'https://lh3.googleusercontent.com/pw/AP1GczOwWRqbzRxtbAczr1cjZP9G2x768va2xxxMR8KOJQiwAz2JP7J2fqgR0bVDSfQAVIWsBhw17tXqE_o0sdVYdO3F9CKlWXi88KwtU1O-WTyHZG8EgthasTuF3lzpBYPw67PYB4GKq_-DldsZ7C2NC2LXww=w346-h346-s-no-gm?authuser=0'),
-    (2, 'Sasthitala Smashers', 'Power in Every Pocket', 'https://lh3.googleusercontent.com/pw/AP1GczP_u52hNJ_vg4neAlzdgA0rENSokLRe_VY4HWcdMSpGFQ4ZDqpdh_TJR7so88ddvSlJjwhnaSss1rc_JQ3weg0K9m20G_478-jdC5oEUOmvezt1mHds-bxZIeRhO3YDKAYJQ7OxWJFisyPSdkbzmAkI_A=w346-h346-s-no-gm?authuser=0'),
-    (3, 'Santinagar Slayers', 'Strike to Conquer', 'https://lh3.googleusercontent.com/pw/AP1GczOr0OX5wyDx05jYk57OJp-dTD4lx_nIJ3cZ1epup267Y9dZUc9jNR8Nu53ayqrWWo5IvpPN2rhiH96Zqlzz46Q_pVXwlkFxAxo91unV7D6cSJbvk6H6vR6tghHAJL-BY9mCjhuUqewM6zrHzhTM0pHSGQ=w346-h346-s-no-gm?authuser=0'),
-    (4, 'Nischinda Ninjas', 'Silent, Sharp, Superior', 'https://lh3.googleusercontent.com/pw/AP1GczM2jls5q1Ehv3Rwx-b3Q0QtLPIJih-taVZgb1RdyofOZwfMyEN_WYXLyx-82sCt-mIrvgzKiP8MpG5lHVFnUDsEe8KeHfCOyMMf2AgmAJtFjw9on20s_F48NPCHMiWjDI3RZXDyOLQ9HHBmy8KJo8eqQw=w346-h346-s-no-gm?authuser=0'),
-    (5, 'Kumillapara Kings', 'Crown of the Board', 'public/assets/images/teams/kumillapara_kings.png'),
-    (6, 'Dum Dum Diamonds', 'Brilliance of the Board', 'public/assets/images/teams/dum_dum_diamonds.png');
+    (1, 'Ghoshpara Strikers', 'Roar of the Board', NULL),
+    (2, 'Sasthitala Smashers', 'Power in Every Pocket', NULL),
+    (3, 'Santinagar Slayers', 'Strike to Conquer', NULL),
+    (4, 'Nischinda Ninjas', 'Silent, Sharp, Superior', NULL),
+    (5, 'Kumillapara Kings', 'Crown of the Board', NULL),
+    (6, 'Dum Dum Diamonds', 'Brilliance of the Board', NULL);
     SET IDENTITY_INSERT dbo.[tblTeams] OFF;
 END
 GO
@@ -658,19 +853,19 @@ BEGIN
     SET IDENTITY_INSERT dbo.[tblPlayers] ON;
     INSERT INTO tblPlayers (Id, Void, FirstName, LastName, DateOfBirth, NationalityId, AvatarUrl, DebutSeasonId)
 VALUES
-    (1, 0, 'Arijit', 'Roy', '2000-07-02', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMPp0ohBmJBb8-pZtqoS7cloF2JJRRNogB-OJ8oPO0PvVnXdwRiyOc1V_zulWrRdBmNDHFcDFwtSkFS48JkawIJ0LpXXUgj6FNFiGA84SN9FTDQZrcjGMa0kftuzSR7yU8ypEGkOLc2d33og9RSagaRvg=w500-h500-s-no-gm?authuser=0', 3),
-    (2, 0, 'Sanchar', 'Bagh', '2001-07-22', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMjRdm59jvJIHnRj0q514dvDMaJyJqnsECA-XD2glBqosGKGyMLkOCeQuKaV8iOBsG8HZFg12fTQbYln7uOggQCoXOc-f-LE3vNg45bOavB5TP1Ogq25vO8gWrN93bNwQl0SpZO5aul4No9Psrf13b0vQ=w500-h500-s-no-gm?authuser=0', 3),
-    (3, 0, 'Avirup', 'Saha', '2005-12-30', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPjXqJX79aKxXi-mtIOOJvdeMGL1w404m0mEas1O6woBcQW0hzPmGY4oDhhTCzxPo-GQ21iCWctRDwP7j5hZBJvjW1Bfg4kvF350JSvpus6d0sAvUoHCYGBrc4KerC6gMcCyk5cmSsV8VXDoSjIfRlnuA=w500-h500-s-no-gm?authuser=0', 3),
-    (4, 0, 'Tusar', 'Maji', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPVAeMXI8RhoN6jiHVmRcvAzc_Y0sQlFSei6-VQsefm-YhNjdRUyOiifmtf4GzBbJkq0_pL0mLI-BswShS1DrGEhQfPMlhFexth5j7E63UfbGXjf0UKI19zmISWHN8nmS3hhJsJ1caJbCm0MVLQ_pWXzw=w500-h500-s-no-gm?authuser=0', 3),
-    (5, 0, 'Tushar', 'Roy', '2006-09-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczMhQVNL4gLQ2E1z87kKQOiFmwxJdZGpiXuiaDu3dzfAtCtWDavZUjEJeJ2ibqlIEPliEZL3C7XppClGhN9lrYufREmLqzC9tabNXXNljmHLMu_oCr2YeXrchQvUofN94OZgjg0a3MIIoYrbx1gdceJApQ=w500-h500-s-no-gm?authuser=0', 3),
-    (6, 0, 'Debjit', 'Pal', '2005-07-25', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPoo0sDOdxHBQvWSo-cZiQNmNb3tQ9_0moUZXz2hHNl2SZ5aCX1kgJn8MEEcTDPjnW6xUdpfcsTLtt9OZoBE-okI2mVAmAvuvdI84jgpN2aj488srQKWEHv8mw6y901_arkc9NSzM7--povzqxOWMP7iw=w500-h500-s-no-gm?authuser=0', 3),
-    (7, 0, 'Sohan', 'Ghosh', '2006-03-15', 102, 'https://lh3.googleusercontent.com/pw/AP1GczPOdLR8sj-rYJh7hL-k6ZhDf2FJk47mc8hi-bizY5wIhVnbO6lkj2Msx9JnMg76Z8_OZ8qC2dMPfEhZlXEzDEkHiABKz5B1KMvsddQsbH-8LuYabp6kCuxadFqyYBMWhv8orVi3Z8x0kyLbmfiIsyK1rw=w500-h500-s-no-gm?authuser=0', 3),
-    (8, 0, 'Sisir K', 'Bagh', '1962-09-13', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOSCK1ZTZyk2VcNnqkYmiCs65IOnOAB4S3DPayev3hqqCNk57LEXQe50Olxl8rGxUNhwN2HL3eWUICi4sGH5CcV7Qa4FaPaIJv2up32hvnvVv3PMT497CO-W8KNgPdKpqqSugD1wI8kyOFPx8_gzRbGdA=w500-h500-s-no-gm?authuser=0', 3),
-    (9, 0, 'Arghya K', 'Mishra', '2001-04-09', 102, 'https://lh3.googleusercontent.com/pw/AP1GczOqFF3Ag3IRJ9gIpA108ddjNUhyI0Guon3cYCf3dnBdojlEv_cEnW2q6J3_f4eYuZbp9EnnPZJEcRhEWy2YFB9EeyjQH8BgFVfmN8nhVE2-io4V6Alqe-IIPPyD0YtuIb2srnHKP3IhqW0TUgl16zXWJg=w500-h500-s-no-gm?authuser=0', 3),
-    (10, 0, 'Ajit', 'Saha', '1972-01-17', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNgWM5pJ8xpLhOUuGngtfBwVZ9lvLy4Hvo18TDJIH68n4smh-jQOyP0ws50m29N7_iIgVINNX1eKn_7Ct0KRkX7PQPuNCv7A7RNn8j0yzZymeM06u0LJNNAo1w4HRKI0X-sz7ebzjTsvta1bJn4zQy-6g=w500-h500-s-no-gm?authuser=0', 3),
-    (11, 0, 'Priyatosh', 'Das', '2005-09-03', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU9TeJ0y1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
-    (12, 0, 'Dipankar', 'Das', '2006-04-04', 102, 'https://lh3.googleusercontent.com/pw/AP1GczNGVwspsFLSmkp52qN12Z3eAZe_abYZAD2Moeow0AJOLgnrFeK8qLz35pGFGdcsCWUyD0YVsJq4kuowZGYlIQS0kWqKS7KN-SeRo07yj8Jq1NAyfBeaiew2VEw07lY9GDhNUglLU1Ko-X_bD90A=w500-h500-s-no-gm?authuser=0', 3),
-    (13, 0, 'Imon', 'Bagh', '1990-08-01', 102, 'https://lh3.googleusercontent.com/pw/AP1GczM8ZO7ODDz7qjBxXmNtVxIXnkNXm33sVZwmuzbtKQ7nbRyRrBR4Lp2zio8WzGAvjisWuKR6edzObnoLCJndj3llUj7wj5vE0Mj72Sydu5IqkOwqF1ock_74k0krecfvY4IzbZE1kG1frlzP9mpvXIYlhQ=w835-h843-s-no-gm?authuser=0', 3),
+    (1, 0, 'Arijit', 'Roy', '2000-07-02', 102, NULL, 3),
+    (2, 0, 'Sanchar', 'Bagh', '2001-07-22', 102, NULL, 3),
+    (3, 0, 'Avirup', 'Saha', '2005-12-30', 102, NULL, 3),
+    (4, 0, 'Tusar', 'Maji', '2006-04-04', 102, NULL, 3),
+    (5, 0, 'Tushar', 'Roy', '2006-09-17', 102, NULL, 3),
+    (6, 0, 'Debjit', 'Pal', '2005-07-25', 102, NULL, 3),
+    (7, 0, 'Sohan', 'Ghosh', '2006-03-15', 102, NULL, 3),
+    (8, 0, 'Sisir K', 'Bagh', '1962-09-13', 102, NULL, 3),
+    (9, 0, 'Arghya K', 'Mishra', '2001-04-09', 102, NULL, 3),
+    (10, 0, 'Ajit', 'Saha', '1972-01-17', 102, NULL, 3),
+    (11, 0, 'Priyatosh', 'Das', '2005-09-03', 102, NULL, 3),
+    (12, 0, 'Dipankar', 'Das', '2006-04-04', 102, NULL, 3),
+    (13, 0, 'Imon', 'Bagh', '1990-08-01', 102, NULL, 3),
     (14, 0, 'Akash', 'Gupta', '2003-08-07', 102, NULL, 3),
     (15, 0, 'Rupankar', 'Das', '2003-09-15', 102, NULL, 3);
     SET IDENTITY_INSERT dbo.[tblPlayers] OFF;
