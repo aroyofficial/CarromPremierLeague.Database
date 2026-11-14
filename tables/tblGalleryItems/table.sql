@@ -5,6 +5,7 @@ CREATE TABLE dbo.tblGalleryItems (
     UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblGalleryItems_UpdatedAt DEFAULT SYSUTCDATETIME(),
     Void BIT NOT NULL CONSTRAINT DF_tblGalleryItems_Void DEFAULT 0,
     SourceType VARCHAR(16) NOT NULL,
+    MediaType VARCHAR(16) NOT NULL CONSTRAINT DF_tblGalleryItems_MediaType DEFAULT 'image',
     Url NVARCHAR(2048) NOT NULL,
     StorageKey NVARCHAR(512) NULL,
     Width INT NOT NULL,

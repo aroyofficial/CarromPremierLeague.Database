@@ -240,6 +240,7 @@ CREATE TABLE dbo.tblGalleryItems (
     UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblGalleryItems_UpdatedAt DEFAULT SYSUTCDATETIME(),
     Void BIT NOT NULL CONSTRAINT DF_tblGalleryItems_Void DEFAULT 0,
     SourceType VARCHAR(16) NOT NULL,
+    MediaType VARCHAR(16) NOT NULL CONSTRAINT DF_tblGalleryItems_MediaType DEFAULT 'image',
     Url NVARCHAR(2048) NOT NULL,
     StorageKey NVARCHAR(512) NULL,
     Width INT NOT NULL,
@@ -251,6 +252,7 @@ CREATE TABLE dbo.tblGalleryItems (
     CreatedBy BIGINT NULL,
     UpdatedBy BIGINT NULL,
     CONSTRAINT CK_tblGalleryItems_SourceType CHECK (SourceType IN ('upload', 'link')),
+    CONSTRAINT CK_tblGalleryItems_MediaType CHECK (MediaType IN ('image', 'video')),
     CONSTRAINT CK_tblGalleryItems_Size CHECK (Width > 0 AND Height > 0),
     CONSTRAINT FK_tblGalleryItems_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id),
     CONSTRAINT FK_tblGalleryItems_UpdatedBy FOREIGN KEY (UpdatedBy) REFERENCES dbo.tblAdmins(Id)
@@ -279,6 +281,14 @@ GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblGalleryItemSeasons_SeasonOrder' AND object_id = OBJECT_ID(N'dbo.tblGalleryItemSeasons'))
     CREATE INDEX IX_tblGalleryItemSeasons_SeasonOrder ON dbo.tblGalleryItemSeasons (SeasonId, SortOrder, ItemId);
+GO
+
+IF COL_LENGTH(N'dbo.tblGalleryItems', N'MediaType') IS NULL
+    ALTER TABLE dbo.tblGalleryItems ADD MediaType VARCHAR(16) NOT NULL CONSTRAINT DF_tblGalleryItems_MediaType DEFAULT 'image';
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblGalleryItems_MediaType', N'C') IS NULL
+    ALTER TABLE dbo.tblGalleryItems ADD CONSTRAINT CK_tblGalleryItems_MediaType CHECK (MediaType IN ('image', 'video'));
 GO
 
 
