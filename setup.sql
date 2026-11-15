@@ -76,7 +76,7 @@ CREATE TABLE dbo.tblAdminCodes (
     ConsumedAt DATETIME2(6) NULL,
     CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminCodes_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_tblAdminCodes_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
-    CONSTRAINT CK_tblAdminCodes_Purpose CHECK (Purpose IN ('email_change', 'password_reset'))
+    CONSTRAINT CK_tblAdminCodes_Purpose CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login'))
 );
 GO
 
@@ -103,6 +103,59 @@ CREATE TABLE dbo.tblAdminLoginRequests (
     CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminLoginRequests_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_tblAdminLoginRequests_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
     CONSTRAINT CK_tblAdminLoginRequests_Status CHECK (Status IN ('pending', 'approved', 'denied', 'claimed', 'expired'))
+);
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblAdminCodes_Purpose', N'C') IS NOT NULL
+    ALTER TABLE dbo.tblAdminCodes DROP CONSTRAINT CK_tblAdminCodes_Purpose;
+GO
+ALTER TABLE dbo.tblAdminCodes ADD CONSTRAINT CK_tblAdminCodes_Purpose
+    CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login'));
+GO
+
+IF COL_LENGTH(N'dbo.tblAdmins', N'MfaEmail') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD MfaEmail BIT NOT NULL CONSTRAINT DF_tblAdmins_MfaEmail DEFAULT 0;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'TotpSecret') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD TotpSecret VARCHAR(255) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'TotpPendingSecret') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD TotpPendingSecret VARCHAR(255) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'TotpLastStep') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD TotpLastStep BIGINT NULL;
+GO
+
+IF OBJECT_ID(N'dbo.tblAdminPasskeys', N'U') IS NULL
+CREATE TABLE dbo.tblAdminPasskeys (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblAdminPasskeys PRIMARY KEY,
+    AdminId BIGINT NOT NULL,
+    CredentialId VARCHAR(512) NOT NULL,
+    PublicKey VARCHAR(2048) NOT NULL,
+    SignCount BIGINT NOT NULL CONSTRAINT DF_tblAdminPasskeys_SignCount DEFAULT 0,
+    Label NVARCHAR(100) NOT NULL,
+    Transports VARCHAR(200) NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminPasskeys_CreatedAt DEFAULT SYSUTCDATETIME(),
+    LastUsedAt DATETIME2(6) NULL,
+    CONSTRAINT FK_tblAdminPasskeys_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT UQ_tblAdminPasskeys_CredentialId UNIQUE (CredentialId)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblAdminMfaChallenges', N'U') IS NULL
+CREATE TABLE dbo.tblAdminMfaChallenges (
+    Id VARCHAR(64) NOT NULL CONSTRAINT PK_tblAdminMfaChallenges PRIMARY KEY,
+    AdminId BIGINT NOT NULL,
+    Purpose VARCHAR(16) NOT NULL,
+    Challenge VARCHAR(128) NULL,
+    DeviceId VARCHAR(64) NULL,
+    DeviceLabel NVARCHAR(160) NULL,
+    Attempts INT NOT NULL CONSTRAINT DF_tblAdminMfaChallenges_Attempts DEFAULT 0,
+    ExpiresAt DATETIME2(6) NOT NULL,
+    ConsumedAt DATETIME2(6) NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminMfaChallenges_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblAdminMfaChallenges_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT CK_tblAdminMfaChallenges_Purpose CHECK (Purpose IN ('login', 'passkey'))
 );
 GO
 
