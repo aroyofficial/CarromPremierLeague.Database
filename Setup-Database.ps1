@@ -421,6 +421,14 @@ IF OBJECT_ID(N'dbo.CK_tblGalleryItems_MediaType', N'C') IS NULL
     ALTER TABLE dbo.tblGalleryItems ADD CONSTRAINT CK_tblGalleryItems_MediaType CHECK (MediaType IN ('image', 'video'));
 GO
 
+-- Gallery deletes remove rows. Clear any rows left voided by the earlier soft delete.
+DELETE gis
+FROM dbo.tblGalleryItemSeasons gis
+JOIN dbo.tblGalleryItems gi ON gi.Id = gis.ItemId
+WHERE gi.Void = 1;
+DELETE FROM dbo.tblGalleryItems WHERE Void = 1;
+GO
+
 
 IF OBJECT_ID(N'dbo.tblPermissions', N'U') IS NULL
 CREATE TABLE dbo.tblPermissions (
