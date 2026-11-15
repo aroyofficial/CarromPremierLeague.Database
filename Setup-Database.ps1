@@ -221,6 +221,32 @@ CREATE TABLE dbo.tblAdminCodes (
 );
 GO
 
+IF OBJECT_ID(N'dbo.tblAdminSessions', N'U') IS NULL
+CREATE TABLE dbo.tblAdminSessions (
+    AdminId BIGINT NOT NULL CONSTRAINT PK_tblAdminSessions PRIMARY KEY,
+    DeviceId VARCHAR(64) NOT NULL,
+    DeviceLabel NVARCHAR(160) NOT NULL,
+    ExpiresAt DATETIME2(6) NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminSessions_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblAdminSessions_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblAdminLoginRequests', N'U') IS NULL
+CREATE TABLE dbo.tblAdminLoginRequests (
+    Id VARCHAR(64) NOT NULL CONSTRAINT PK_tblAdminLoginRequests PRIMARY KEY,
+    AdminId BIGINT NOT NULL,
+    DeviceId VARCHAR(64) NOT NULL,
+    DeviceLabel NVARCHAR(160) NOT NULL,
+    Status VARCHAR(16) NOT NULL,
+    AccessToken NVARCHAR(900) NULL,
+    ExpiresAt DATETIME2(6) NOT NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminLoginRequests_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblAdminLoginRequests_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT CK_tblAdminLoginRequests_Status CHECK (Status IN ('pending', 'approved', 'denied', 'claimed', 'expired'))
+);
+GO
+
 IF OBJECT_ID(N'dbo.CK_tblAdmins_Gender', N'C') IS NULL
     ALTER TABLE dbo.tblAdmins ADD CONSTRAINT CK_tblAdmins_Gender
         CHECK (Gender IS NULL OR Gender IN ('female', 'male', 'other'));
@@ -411,6 +437,8 @@ CREATE TABLE dbo.tblSettings (
     LeagueQueen BIT NOT NULL CONSTRAINT DF_tblSettings_LeagueQueen DEFAULT 0,
     QueenNeedsCover BIT NOT NULL CONSTRAINT DF_tblSettings_QueenNeedsCover DEFAULT 0,
     AssistantEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantEnabled DEFAULT 1,
+    AssistantPublicEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantPublicEnabled DEFAULT 1,
+    AssistantAdminEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantAdminEnabled DEFAULT 1,
     UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSettings_UpdatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT CK_tblSettings_SingleRow CHECK (Id = 1),
     CONSTRAINT CK_tblSettings_RegulationMinutes CHECK (RegulationMinutes BETWEEN 5 AND 30),
@@ -423,9 +451,18 @@ IF COL_LENGTH(N'dbo.tblSettings', N'AssistantEnabled') IS NULL
     ALTER TABLE dbo.tblSettings ADD AssistantEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantEnabled DEFAULT 1;
 GO
 
+-- Striker has one switch for the public site and one for the admin console. Existing rows keep what the single switch said.
+IF COL_LENGTH(N'dbo.tblSettings', N'AssistantPublicEnabled') IS NULL
+BEGIN
+    ALTER TABLE dbo.tblSettings ADD AssistantPublicEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantPublicEnabled DEFAULT 1;
+    ALTER TABLE dbo.tblSettings ADD AssistantAdminEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantAdminEnabled DEFAULT 1;
+    EXEC(N'UPDATE dbo.tblSettings SET AssistantPublicEnabled = AssistantEnabled, AssistantAdminEnabled = AssistantEnabled');
+END
+GO
+
 IF NOT EXISTS (SELECT 1 FROM dbo.tblSettings WHERE Id = 1)
-INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover, AssistantEnabled)
-VALUES (1, 15, 5, 0, 0, 1);
+INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover, AssistantEnabled, AssistantPublicEnabled, AssistantAdminEnabled)
+VALUES (1, 15, 5, 0, 0, 1, 1, 1);
 GO
 
 
@@ -535,6 +572,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblAdminPermissions_P
 GO
 
 -- Keep in step with CarromPremierLeague.API core/permissions.py, which upserts the same rows on startup.
+DECLARE @assistantIsNew BIT = CASE WHEN EXISTS (SELECT 1 FROM dbo.tblPermissions WHERE Code = N'assistant.use') THEN 0 ELSE 1 END;
 MERGE dbo.tblPermissions AS target
 USING (VALUES
     ('seasons.create', N'Seasons', N'Create seasons', N'Add a new season.', 10),
@@ -562,6 +600,7 @@ USING (VALUES
     ('admins.update', N'Admin users', N'Edit admin users', N'Rename other admins, reset their passwords and turn accounts on or off.', 730),
     ('admins.delete', N'Admin users', N'Delete admin users', N'Remove another admin user.', 740),
     ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810),
+    ('assistant.use', N'Striker assistant', N'Use Striker', N'Open the Striker chat in this console. Striker still follows every other permission you hold.', 910),
     ('gallery.create', N'Gallery', N'Add gallery photos', N'Upload a photo or save a public image link as a draft.', 650),
     ('gallery.update', N'Gallery', N'Edit gallery photos', N'Change captions, seasons, order and covers.', 660),
     ('gallery.publish', N'Gallery', N'Publish gallery photos', N'Make a draft photo visible on the public gallery.', 670),
@@ -572,6 +611,17 @@ WHEN MATCHED AND (target.Area <> source.Area OR target.Name <> source.Name OR ta
     UPDATE SET Area = source.Area, Name = source.Name, Description = source.Description, SortOrder = source.SortOrder, UpdatedAt = SYSUTCDATETIME()
 WHEN NOT MATCHED THEN
     INSERT (Code, Area, Name, Description, SortOrder) VALUES (source.Code, source.Area, source.Name, source.Description, source.SortOrder);
+
+-- Once, when the permission first appears: admins who manage permissions keep the chat they had and can pass it on.
+IF @assistantIsNew = 1
+INSERT INTO dbo.tblAdminPermissions (AdminId, PermissionCode)
+SELECT DISTINCT ap.AdminId, N'assistant.use'
+FROM dbo.tblAdminPermissions ap
+WHERE ap.PermissionCode = N'permissions.manage'
+  AND NOT EXISTS (
+      SELECT 1 FROM dbo.tblAdminPermissions held
+      WHERE held.AdminId = ap.AdminId AND held.PermissionCode = N'assistant.use'
+  );
 GO
 
 -- Bootstrap only: when nobody holds any permission, the seed admin receives all of them.
@@ -673,7 +723,8 @@ USING (VALUES
     ('settings', 'matchday', N'Settings', N'Match clock and Queen rules.', 'Setting', 70),
     ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
     ('gallery', 'media', N'Gallery', N'Season photos.', 'Picture', 55),
-    ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90)
+    ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90),
+    ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95)
 ) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
@@ -711,6 +762,7 @@ JOIN (VALUES
     ('admins.update', 'admins', 'admins.view'),
     ('admins.delete', 'admins', 'admins.view'),
     ('permissions.manage', 'permissions', NULL),
+    ('assistant.use', 'assistant', NULL),
     ('gallery.create', 'gallery', NULL),
     ('gallery.update', 'gallery', NULL),
     ('gallery.publish', 'gallery', 'gallery.update'),
@@ -726,7 +778,8 @@ USING (VALUES
     ('season_planner', N'Season planner', N'Sets up seasons, picks their teams, fills rosters and schedules fixtures.', 20),
     ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
     ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40),
-    ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50)
+    ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50),
+    ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -758,12 +811,13 @@ USING (VALUES
     ('gallery_curator', 'gallery.create'),
     ('gallery_curator', 'gallery.update'),
     ('gallery_curator', 'gallery.publish'),
-    ('gallery_curator', 'gallery.delete')
+    ('gallery_curator', 'gallery.delete'),
+    ('assistant_user', 'assistant.use')
 ) AS source (RoleCode, PermissionCode)
     ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
-WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator') THEN
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator', 'assistant_user') THEN
     DELETE;
 GO
 
