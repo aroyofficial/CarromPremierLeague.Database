@@ -76,7 +76,7 @@ CREATE TABLE dbo.tblAdminCodes (
     ConsumedAt DATETIME2(6) NULL,
     CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminCodes_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_tblAdminCodes_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
-    CONSTRAINT CK_tblAdminCodes_Purpose CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login'))
+    CONSTRAINT CK_tblAdminCodes_Purpose CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login', 'password_ticket'))
 );
 GO
 
@@ -110,7 +110,12 @@ IF OBJECT_ID(N'dbo.CK_tblAdminCodes_Purpose', N'C') IS NOT NULL
     ALTER TABLE dbo.tblAdminCodes DROP CONSTRAINT CK_tblAdminCodes_Purpose;
 GO
 ALTER TABLE dbo.tblAdminCodes ADD CONSTRAINT CK_tblAdminCodes_Purpose
-    CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login'));
+    CHECK (Purpose IN ('email_change', 'password_reset', 'password_change', 'activation', 'login', 'password_ticket'));
+GO
+
+-- When the password last changed, shown on the profile and in the follow-up email. Unknown for older accounts.
+IF COL_LENGTH(N'dbo.tblAdmins', N'PasswordChangedAt') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD PasswordChangedAt DATETIME2(6) NULL;
 GO
 
 IF COL_LENGTH(N'dbo.tblAdmins', N'MfaEmail') IS NULL
