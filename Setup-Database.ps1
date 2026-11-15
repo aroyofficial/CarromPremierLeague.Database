@@ -163,6 +163,7 @@ CREATE TABLE dbo.tblAdmins (
     PasswordIterations INT NOT NULL CONSTRAINT DF_tblAdmins_PasswordIterations DEFAULT 310000,
     TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1,
     IsActive BIT NOT NULL CONSTRAINT DF_tblAdmins_IsActive DEFAULT 1,
+    MustChangePassword BIT NOT NULL CONSTRAINT DF_tblAdmins_MustChangePassword DEFAULT 0,
     CONSTRAINT UQ_tblAdmins_Username UNIQUE (Username),
     CONSTRAINT CK_tblAdmins_PasswordIterations CHECK (PasswordIterations >= 100000)
 );
@@ -198,6 +199,26 @@ IF COL_LENGTH(N'dbo.tblAdmins', N'AvatarUrl') IS NULL
 GO
 IF COL_LENGTH(N'dbo.tblAdmins', N'AvatarStorageKey') IS NULL
     ALTER TABLE dbo.tblAdmins ADD AvatarStorageKey NVARCHAR(512) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'MustChangePassword') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD MustChangePassword BIT NOT NULL CONSTRAINT DF_tblAdmins_MustChangePassword DEFAULT 0;
+GO
+
+IF OBJECT_ID(N'dbo.tblAdminCodes', N'U') IS NULL
+CREATE TABLE dbo.tblAdminCodes (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblAdminCodes PRIMARY KEY,
+    AdminId BIGINT NOT NULL,
+    Purpose VARCHAR(32) NOT NULL,
+    Destination NVARCHAR(254) NOT NULL,
+    CodeHash VARCHAR(64) NOT NULL,
+    CodeSalt VARCHAR(64) NOT NULL,
+    Attempts INT NOT NULL CONSTRAINT DF_tblAdminCodes_Attempts DEFAULT 0,
+    ExpiresAt DATETIME2(6) NOT NULL,
+    ConsumedAt DATETIME2(6) NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminCodes_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT FK_tblAdminCodes_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id),
+    CONSTRAINT CK_tblAdminCodes_Purpose CHECK (Purpose IN ('email_change', 'password_reset'))
+);
 GO
 
 IF OBJECT_ID(N'dbo.CK_tblAdmins_Gender', N'C') IS NULL
@@ -389,6 +410,7 @@ CREATE TABLE dbo.tblSettings (
     ExtraMinutes INT NOT NULL CONSTRAINT DF_tblSettings_ExtraMinutes DEFAULT 5,
     LeagueQueen BIT NOT NULL CONSTRAINT DF_tblSettings_LeagueQueen DEFAULT 0,
     QueenNeedsCover BIT NOT NULL CONSTRAINT DF_tblSettings_QueenNeedsCover DEFAULT 0,
+    AssistantEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantEnabled DEFAULT 1,
     UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSettings_UpdatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT CK_tblSettings_SingleRow CHECK (Id = 1),
     CONSTRAINT CK_tblSettings_RegulationMinutes CHECK (RegulationMinutes BETWEEN 5 AND 30),
@@ -397,9 +419,13 @@ CREATE TABLE dbo.tblSettings (
 );
 GO
 
+IF COL_LENGTH(N'dbo.tblSettings', N'AssistantEnabled') IS NULL
+    ALTER TABLE dbo.tblSettings ADD AssistantEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantEnabled DEFAULT 1;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM dbo.tblSettings WHERE Id = 1)
-INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover)
-VALUES (1, 15, 5, 0, 0);
+INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover, AssistantEnabled)
+VALUES (1, 15, 5, 0, 0, 1);
 GO
 
 
