@@ -31,6 +31,47 @@ IF COL_LENGTH(N'dbo.tblAdmins', N'TokenVersion') IS NULL
     ALTER TABLE dbo.tblAdmins ADD TokenVersion INT NOT NULL CONSTRAINT DF_tblAdmins_TokenVersion DEFAULT 1;
 GO
 
+IF COL_LENGTH(N'dbo.tblAdmins', N'FirstName') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD FirstName NVARCHAR(100) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'LastName') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD LastName NVARCHAR(100) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'DateOfBirth') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD DateOfBirth DATE NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'Gender') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD Gender VARCHAR(16) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'PhoneCode') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD PhoneCode NVARCHAR(8) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'PhoneNumber') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD PhoneNumber NVARCHAR(20) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'Email') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD Email NVARCHAR(254) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'AvatarUrl') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD AvatarUrl NVARCHAR(2048) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblAdmins', N'AvatarStorageKey') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD AvatarStorageKey NVARCHAR(512) NULL;
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblAdmins_Gender', N'C') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD CONSTRAINT CK_tblAdmins_Gender
+        CHECK (Gender IS NULL OR Gender IN ('female', 'male', 'other'));
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblAdmins_Phone', N'C') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD CONSTRAINT CK_tblAdmins_Phone
+        CHECK (
+            (PhoneCode IS NULL AND PhoneNumber IS NULL)
+            OR (PhoneCode IS NOT NULL AND PhoneNumber IS NOT NULL)
+        );
+GO
+
 IF NOT EXISTS (SELECT 1 FROM dbo.tblAdmins WHERE Username = N'admin')
 INSERT INTO dbo.tblAdmins (Username, PasswordHash, PasswordSalt, PasswordIterations, IsActive)
 VALUES (
@@ -285,6 +326,14 @@ GO
 
 IF COL_LENGTH(N'dbo.tblGalleryItems', N'MediaType') IS NULL
     ALTER TABLE dbo.tblGalleryItems ADD MediaType VARCHAR(16) NOT NULL CONSTRAINT DF_tblGalleryItems_MediaType DEFAULT 'image';
+GO
+
+IF COL_LENGTH(N'dbo.tblGalleryItems', N'SortOrder') IS NULL
+    ALTER TABLE dbo.tblGalleryItems ADD SortOrder INT NOT NULL CONSTRAINT DF_tblGalleryItems_SortOrder DEFAULT 0;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblGalleryItems_LibraryOrder' AND object_id = OBJECT_ID(N'dbo.tblGalleryItems'))
+    CREATE INDEX IX_tblGalleryItems_LibraryOrder ON dbo.tblGalleryItems (SortOrder, Id) WHERE Void = 0;
 GO
 
 IF OBJECT_ID(N'dbo.CK_tblGalleryItems_MediaType', N'C') IS NULL
