@@ -1212,6 +1212,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM dbo.tblPlayers WHERE Id = @p_PlayerId AND Void = 0) THROW 50001, 'Invalid PlayerId', 1;
     IF NOT EXISTS (SELECT 1 FROM dbo.tblTeams WHERE Id = @p_TeamId AND Void = 0) THROW 50002, 'Invalid TeamId', 1;
     IF NOT EXISTS (SELECT 1 FROM dbo.tblSeasons WHERE Id = @p_SeasonId AND Void = 0) THROW 50003, 'Invalid SeasonId', 1;
+    IF (
+        SELECT COUNT(*)
+        FROM dbo.tblPlayersSeasonsTeams
+        WHERE SeasonId = @p_SeasonId AND TeamId = @p_TeamId AND PlayerId <> @p_PlayerId AND Void = 0
+    ) >= 2
+        THROW 50004, 'A team can have at most two players.', 1;
 
     MERGE dbo.tblPlayersSeasonsTeams AS target
     USING (SELECT @p_PlayerId AS PlayerId, @p_SeasonId AS SeasonId, @p_TeamId AS TeamId) AS source

@@ -12,6 +12,7 @@ BEGIN
     DECLARE v_PlayerExists INT DEFAULT 0;
     DECLARE v_TeamExists INT DEFAULT 0;
     DECLARE v_SeasonExists INT DEFAULT 0;
+    DECLARE v_RosterCount INT DEFAULT 0;
 
     -- Validate Player
     SELECT COUNT(*) INTO v_PlayerExists
@@ -41,6 +42,18 @@ BEGIN
     IF v_SeasonExists = 0 THEN
         SIGNAL SQLSTATE '45000'
         SET MESSAGE_TEXT = 'Invalid SeasonId';
+    END IF;
+
+    SELECT COUNT(*) INTO v_RosterCount
+    FROM tblPlayersSeasonsTeams
+    WHERE SeasonId = p_SeasonId
+      AND TeamId = p_TeamId
+      AND PlayerId <> p_PlayerId
+      AND Void = 0;
+
+    IF v_RosterCount >= 2 THEN
+        SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'A team can have at most two players.';
     END IF;
 
     -- Insert or Update (transfer logic)
