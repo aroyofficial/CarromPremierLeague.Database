@@ -1401,7 +1401,7 @@ $content = ($sections -join "`r`n`r`n")
 Write-Host "Generated $setupPath"
 
 if ($Apply) {
-    & sqlcmd -S $Server -U $SqlUsername -P $SqlPassword -C -b -v DatabaseName=$DatabaseName -i $setupPath
+    & sqlcmd -S $Server -U $SqlUsername -P $SqlPassword -I -C -b -v DatabaseName=$DatabaseName -i $setupPath
     if ($LASTEXITCODE -ne 0) { throw "sqlcmd failed while provisioning $DatabaseName." }
     Write-Host "Provisioned $DatabaseName on $Server."
 }
