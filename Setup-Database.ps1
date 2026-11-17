@@ -318,6 +318,284 @@ IF OBJECT_ID(N'dbo.CK_tblAdmins_Phone', N'C') IS NULL
         );
 GO
 
+-- One canonical number per profile. The backfill below fills it and the unique index enforces it.
+-- Rollback: drop UX_tblAdmins_PhoneE164 first, then ALTER TABLE dbo.tblAdmins DROP COLUMN PhoneE164;
+IF COL_LENGTH(N'dbo.tblAdmins', N'PhoneE164') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD PhoneE164 VARCHAR(16) NULL;
+GO
+
+-- Set only after the phone's OTP is confirmed. NULL means the number is not trusted.
+-- Rollback: ALTER TABLE dbo.tblAdmins DROP COLUMN PhoneVerifiedAt;  (no data loss for other columns)
+IF COL_LENGTH(N'dbo.tblAdmins', N'PhoneVerifiedAt') IS NULL
+    ALTER TABLE dbo.tblAdmins ADD PhoneVerifiedAt DATETIME2(6) NULL;
+GO
+
+-- One-time phone codes. Only a salted HMAC is stored, never the code. Rows are kept for audit.
+-- Rollback: DROP TABLE dbo.tblPhoneOtps;  (no other table references it)
+IF OBJECT_ID(N'dbo.tblPhoneOtps', N'U') IS NULL
+CREATE TABLE dbo.tblPhoneOtps (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblPhoneOtps PRIMARY KEY,
+    OwnerKind VARCHAR(16) NOT NULL,
+    OwnerId BIGINT NOT NULL,
+    PhoneE164 VARCHAR(16) NOT NULL,
+    CodeHash VARCHAR(64) NOT NULL,
+    CodeSalt VARCHAR(64) NOT NULL,
+    Attempts INT NOT NULL CONSTRAINT DF_tblPhoneOtps_Attempts DEFAULT 0,
+    ExpiresAt DATETIME2(6) NOT NULL,
+    ConsumedAt DATETIME2(6) NULL,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPhoneOtps_CreatedAt DEFAULT SYSUTCDATETIME(),
+    CONSTRAINT CK_tblPhoneOtps_Kind CHECK (OwnerKind IN ('admin', 'player'))
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblPhoneOtps_Owner' AND object_id = OBJECT_ID(N'dbo.tblPhoneOtps'))
+    CREATE INDEX IX_tblPhoneOtps_Owner ON dbo.tblPhoneOtps (OwnerKind, OwnerId, CreatedAt);
+GO
+
+-- Claims each number once across admins and players (primary key on the number).
+-- Rollback: restore the API version that does not use it first, then DROP TABLE dbo.tblContactPhones;
+IF OBJECT_ID(N'dbo.tblContactPhones', N'U') IS NULL
+CREATE TABLE dbo.tblContactPhones (
+    PhoneE164 VARCHAR(16) NOT NULL CONSTRAINT PK_tblContactPhones PRIMARY KEY,
+    OwnerKind VARCHAR(16) NOT NULL,
+    OwnerId BIGINT NOT NULL,
+    CONSTRAINT CK_tblContactPhones_Kind CHECK (OwnerKind IN ('admin', 'player')),
+    CONSTRAINT CK_tblContactPhones_E164 CHECK (PhoneE164 LIKE '+[1-9]%' AND PhoneE164 NOT LIKE '%[^0-9+]%')
+);
+GO
+
+-- Verification is tracked on the profile (PhoneVerifiedAt), not on the claim.
+-- Rollback: ALTER TABLE dbo.tblContactPhones ADD Verified BIT NOT NULL CONSTRAINT DF_tblContactPhones_Verified DEFAULT 0;
+IF COL_LENGTH(N'dbo.tblContactPhones', N'Verified') IS NOT NULL
+BEGIN
+    -- Drop whichever default is bound to the column, whatever it is named.
+    DECLARE @verifiedDefault sysname = (
+        SELECT dc.name
+        FROM sys.default_constraints dc
+        INNER JOIN sys.columns c ON c.object_id = dc.parent_object_id AND c.column_id = dc.parent_column_id
+        WHERE dc.parent_object_id = OBJECT_ID(N'dbo.tblContactPhones') AND c.name = N'Verified');
+    IF @verifiedDefault IS NOT NULL
+    BEGIN
+        DECLARE @dropDefault NVARCHAR(400) = N'ALTER TABLE dbo.tblContactPhones DROP CONSTRAINT ' + QUOTENAME(@verifiedDefault);
+        EXEC (@dropDefault);
+    END
+    ALTER TABLE dbo.tblContactPhones DROP COLUMN Verified;
+END
+GO
+
+-- Migration log. Every admin phone this script changes or clears is written here first,
+-- so the old value can be restored by hand. Rows are kept; the script never deletes them.
+-- The log holds old phone numbers: only database owners should read it, and it can be
+-- purged once the owner has checked the migration (for example after 90 days).
+-- Rollback for the phone normalisation: copy OldPhoneCode, OldPhoneNumber, OldPhoneE164 and
+-- OldPhoneVerifiedAt back onto dbo.tblAdmins for the logged rows. Restoring a 'duplicate' or
+-- 'conflict' row re-creates a shared number, so decide per row. Then drop dbo.tblPhoneMigrationLog.
+IF OBJECT_ID(N'dbo.tblPhoneMigrationLog', N'U') IS NULL
+CREATE TABLE dbo.tblPhoneMigrationLog (
+    Id INT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblPhoneMigrationLog PRIMARY KEY,
+    OwnerKind VARCHAR(16) NOT NULL,
+    OwnerId BIGINT NOT NULL,
+    OldPhoneCode NVARCHAR(20) NULL,
+    OldPhoneNumber NVARCHAR(40) NULL,
+    NewPhoneCode NVARCHAR(8) NULL,
+    NewPhoneNumber NVARCHAR(20) NULL,
+    Reason VARCHAR(32) NOT NULL,
+    LoggedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPhoneMigrationLog_LoggedAt DEFAULT SYSUTCDATETIME()
+);
+GO
+
+IF COL_LENGTH(N'dbo.tblPhoneMigrationLog', N'OldPhoneE164') IS NULL
+    ALTER TABLE dbo.tblPhoneMigrationLog ADD OldPhoneE164 VARCHAR(16) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPhoneMigrationLog', N'OldPhoneVerifiedAt') IS NULL
+    ALTER TABLE dbo.tblPhoneMigrationLog ADD OldPhoneVerifiedAt DATETIME2(6) NULL;
+GO
+
+-- Normalise admin numbers with the same rules as core/phone_numbers.py canonicalize():
+-- separators removed, leading zeros dropped, a repeated country code removed (for +91 only when
+-- the number is longer than 10 digits; elsewhere only when it was typed with + or 00, or the
+-- result would be too long), then E.164 checked (8 to 15 digits; +91 must be a 10-digit mobile
+-- starting 6 to 9).
+--   normalized  the number is stored in canonical form.
+--   malformed   the number cannot be read. It is kept as typed but not trusted (PhoneE164 NULL);
+--               the next save through the API asks for a valid number.
+--   duplicate   another admin keeps the number: the one that already claims it, else the one that
+--               verified it, else the lowest Id. This admin's number is cleared.
+--   conflict    a player already claims the number. The admin's number is cleared.
+--   removed     the number was removed but PhoneE164 was left behind (an older API). It is cleared.
+-- A number that changes loses its verification. Everything runs in one transaction, so a failure
+-- leaves the data as it was. Running the script again changes nothing.
+SET XACT_ABORT ON;
+BEGIN TRANSACTION;
+
+-- Hold both tables for the whole backfill, so a phone saved by the API while this runs is
+-- neither overwritten by an older decision nor claimed between the check and the claim insert.
+-- Same order the API writes in (profile table, then claims), so the locks cannot deadlock with a save.
+SELECT TOP (0) 1 FROM dbo.tblAdmins WITH (TABLOCKX, HOLDLOCK);
+-- tblPlayers is created later on a fresh install, so the lock is taken only when it exists.
+IF OBJECT_ID(N'dbo.tblPlayers', N'U') IS NOT NULL
+    EXEC (N'SELECT TOP (0) 1 FROM dbo.tblPlayers WITH (TABLOCKX, HOLDLOCK);');
+SELECT TOP (0) 1 FROM dbo.tblContactPhones WITH (TABLOCKX, HOLDLOCK);
+
+-- Claims whose player was deleted or changed number no longer hold the number.
+IF COL_LENGTH(N'dbo.tblPlayers', N'PhoneE164') IS NOT NULL
+    EXEC (N'DELETE c FROM dbo.tblContactPhones c
+            WHERE c.OwnerKind = ''player''
+              AND NOT EXISTS (SELECT 1 FROM dbo.tblPlayers p
+                              WHERE p.Id = c.OwnerId AND p.Void = 0 AND p.PhoneE164 = c.PhoneE164);');
+
+IF OBJECT_ID(N'tempdb..#admin_phone_decisions', N'U') IS NOT NULL DROP TABLE #admin_phone_decisions;
+
+;WITH src AS (
+    SELECT a.Id, a.PhoneCode, a.PhoneNumber, a.PhoneE164, a.PhoneVerifiedAt,
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(a.PhoneCode,
+               N'+', N''), N' ', N''), N'-', N''), N'(', N''), N')', N''), N'.', N''), N'/', N''), NCHAR(9), N''), NCHAR(160), N'') AS CodeRaw,
+           REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(a.PhoneNumber,
+               N'+', N''), N' ', N''), N'-', N''), N'(', N''), N')', N''), N'.', N''), N'/', N''), NCHAR(9), N''), NCHAR(160), N'') AS NumRaw,
+           CASE WHEN LTRIM(a.PhoneNumber) LIKE N'+%' OR LTRIM(a.PhoneNumber) LIKE N'00%' THEN 1 ELSE 0 END AS TypedIntl
+    FROM dbo.tblAdmins a
+    WHERE a.Void = 0 AND a.PhoneCode IS NOT NULL
+),
+trimmed AS (
+    SELECT Id, PhoneCode, PhoneNumber, PhoneE164, PhoneVerifiedAt, TypedIntl,
+           CASE WHEN CodeRaw NOT LIKE N'%[^0-9]%' AND CodeRaw LIKE N'%[1-9]%'
+                THEN SUBSTRING(CodeRaw, PATINDEX(N'%[1-9]%', CodeRaw), 20) END AS CodeDigits,
+           CASE WHEN NumRaw NOT LIKE N'%[^0-9]%' AND NumRaw LIKE N'%[1-9]%'
+                THEN SUBSTRING(NumRaw, PATINDEX(N'%[1-9]%', NumRaw), 40) END AS NumNoTrunk
+    FROM src
+),
+nationalDigits AS (
+    SELECT Id, PhoneCode, PhoneNumber, PhoneE164, PhoneVerifiedAt, CodeDigits,
+           CASE WHEN NumNoTrunk IS NULL OR CodeDigits IS NULL THEN NumNoTrunk
+                WHEN LEFT(NumNoTrunk, LEN(CodeDigits)) = CodeDigits
+                 AND LEN(NumNoTrunk) - LEN(CodeDigits) >= 8
+                 AND ((CodeDigits = N'91' AND LEN(NumNoTrunk) > 10)
+                      OR (CodeDigits <> N'91' AND (TypedIntl = 1 OR LEN(CodeDigits) + LEN(NumNoTrunk) > 15)))
+                -- A trunk 0 after the country code ("+44 (0)20 ...") is dropped too.
+                THEN CASE WHEN SUBSTRING(NumNoTrunk, LEN(CodeDigits) + 1, 40) LIKE N'%[1-9]%'
+                          THEN SUBSTRING(SUBSTRING(NumNoTrunk, LEN(CodeDigits) + 1, 40),
+                                         PATINDEX(N'%[1-9]%', SUBSTRING(NumNoTrunk, LEN(CodeDigits) + 1, 40)), 40) END
+                ELSE NumNoTrunk END AS NationalDigits
+    FROM trimmed
+),
+canon AS (
+    SELECT Id, PhoneCode, PhoneNumber, PhoneE164, PhoneVerifiedAt, CodeDigits, NationalDigits,
+           CASE WHEN CodeDigits IS NOT NULL AND LEN(CodeDigits) BETWEEN 1 AND 4
+                 AND NationalDigits IS NOT NULL
+                 AND LEN(CodeDigits) + LEN(NationalDigits) BETWEEN 8 AND 15
+                 AND (CodeDigits <> N'91' OR (LEN(NationalDigits) = 10 AND NationalDigits LIKE N'[6-9]%'))
+                THEN N'+' + CodeDigits + NationalDigits END AS NewE164
+    FROM nationalDigits
+),
+ranked AS (
+    SELECT c.Id, c.CodeDigits, c.NationalDigits, c.NewE164,
+           ROW_NUMBER() OVER (
+               PARTITION BY c.NewE164
+               ORDER BY CASE WHEN EXISTS (SELECT 1 FROM dbo.tblContactPhones k
+                                          WHERE k.PhoneE164 = c.NewE164 AND k.OwnerKind = 'admin' AND k.OwnerId = c.Id)
+                             THEN 0 ELSE 1 END,
+                        CASE WHEN c.PhoneVerifiedAt IS NOT NULL AND c.PhoneE164 = c.NewE164 THEN 0 ELSE 1 END,
+                        c.Id) AS n,
+           CASE WHEN EXISTS (SELECT 1 FROM dbo.tblContactPhones k
+                             WHERE k.PhoneE164 = c.NewE164 AND k.OwnerKind = 'player')
+                THEN 1 ELSE 0 END AS PlayerHolds
+    FROM canon c
+    WHERE c.NewE164 IS NOT NULL
+)
+SELECT c.Id, c.PhoneCode AS OldCode, c.PhoneNumber AS OldNumber, c.PhoneE164 AS OldE164, c.PhoneVerifiedAt AS OldVerifiedAt,
+       CASE WHEN r.Id IS NULL THEN 'malformed'
+            WHEN r.PlayerHolds = 1 THEN 'conflict'
+            WHEN r.n > 1 THEN 'duplicate'
+            ELSE 'normalized' END AS Reason,
+       CASE WHEN r.Id IS NULL OR r.PlayerHolds = 1 OR r.n > 1 THEN CAST(NULL AS NVARCHAR(8)) ELSE N'+' + r.CodeDigits END AS NewCode,
+       CASE WHEN r.Id IS NULL OR r.PlayerHolds = 1 OR r.n > 1 THEN CAST(NULL AS NVARCHAR(20)) ELSE r.NationalDigits END AS NewNumber,
+       CASE WHEN r.Id IS NULL OR r.PlayerHolds = 1 OR r.n > 1 THEN CAST(NULL AS VARCHAR(16)) ELSE r.NewE164 END AS NewE164
+INTO #admin_phone_decisions
+FROM canon c
+LEFT JOIN ranked r ON r.Id = c.Id;
+
+-- Log the rows that will change, before they change.
+INSERT INTO dbo.tblPhoneMigrationLog
+    (OwnerKind, OwnerId, OldPhoneCode, OldPhoneNumber, OldPhoneE164, OldPhoneVerifiedAt, NewPhoneCode, NewPhoneNumber, Reason)
+SELECT 'admin', d.Id, d.OldCode, d.OldNumber, d.OldE164, d.OldVerifiedAt, d.NewCode, d.NewNumber, d.Reason
+FROM #admin_phone_decisions d
+WHERE d.Reason IN ('duplicate', 'conflict')
+   OR (d.Reason = 'malformed' AND (d.OldE164 IS NOT NULL OR d.OldVerifiedAt IS NOT NULL OR NOT EXISTS (
+           SELECT 1 FROM dbo.tblPhoneMigrationLog l
+           WHERE l.OwnerKind = 'admin' AND l.OwnerId = d.Id AND l.Reason = 'malformed'
+             AND l.OldPhoneCode = d.OldCode AND l.OldPhoneNumber = d.OldNumber)))
+   OR (d.Reason = 'normalized' AND (d.OldE164 IS NULL OR d.OldE164 <> d.NewE164
+                                    OR d.OldCode <> d.NewCode OR d.OldNumber <> d.NewNumber));
+
+INSERT INTO dbo.tblPhoneMigrationLog
+    (OwnerKind, OwnerId, OldPhoneCode, OldPhoneNumber, OldPhoneE164, OldPhoneVerifiedAt, Reason)
+SELECT 'admin', a.Id, NULL, NULL, a.PhoneE164, a.PhoneVerifiedAt, 'removed'
+FROM dbo.tblAdmins a
+WHERE a.PhoneCode IS NULL AND (a.PhoneE164 IS NOT NULL OR a.PhoneVerifiedAt IS NOT NULL);
+
+-- Clear first, so a kept number never meets the old holder on the unique index.
+UPDATE a
+SET PhoneCode = NULL, PhoneNumber = NULL, PhoneE164 = NULL, PhoneVerifiedAt = NULL
+FROM dbo.tblAdmins a
+INNER JOIN #admin_phone_decisions d ON d.Id = a.Id
+WHERE d.Reason IN ('duplicate', 'conflict');
+
+UPDATE dbo.tblAdmins
+SET PhoneE164 = NULL, PhoneVerifiedAt = NULL
+WHERE PhoneCode IS NULL AND (PhoneE164 IS NOT NULL OR PhoneVerifiedAt IS NOT NULL);
+
+UPDATE a
+SET PhoneE164 = NULL, PhoneVerifiedAt = NULL
+FROM dbo.tblAdmins a
+INNER JOIN #admin_phone_decisions d ON d.Id = a.Id
+WHERE d.Reason = 'malformed' AND (a.PhoneE164 IS NOT NULL OR a.PhoneVerifiedAt IS NOT NULL);
+
+-- Free the changing numbers first. One UPDATE can otherwise give a row a number that another
+-- row in the same statement still holds, and the unique index rejects it.
+UPDATE a
+SET PhoneE164 = NULL
+FROM dbo.tblAdmins a
+INNER JOIN #admin_phone_decisions d ON d.Id = a.Id
+WHERE d.Reason = 'normalized' AND ISNULL(a.PhoneE164, '') <> d.NewE164;
+
+UPDATE a
+SET PhoneCode = d.NewCode, PhoneNumber = d.NewNumber, PhoneE164 = d.NewE164,
+    PhoneVerifiedAt = CASE WHEN a.PhoneE164 = d.NewE164 THEN a.PhoneVerifiedAt END
+FROM dbo.tblAdmins a
+INNER JOIN #admin_phone_decisions d ON d.Id = a.Id
+WHERE d.Reason = 'normalized';
+
+-- Reconcile admin claims with the profiles instead of rebuilding them, so no claim is ever missing.
+DELETE c
+FROM dbo.tblContactPhones c
+WHERE c.OwnerKind = 'admin'
+  AND NOT EXISTS (SELECT 1 FROM dbo.tblAdmins a
+                  WHERE a.Id = c.OwnerId AND a.Void = 0 AND a.PhoneE164 = c.PhoneE164);
+
+INSERT INTO dbo.tblContactPhones (PhoneE164, OwnerKind, OwnerId)
+SELECT a.PhoneE164, 'admin', a.Id
+FROM dbo.tblAdmins a
+WHERE a.Void = 0
+  AND a.PhoneE164 IS NOT NULL
+  AND NOT EXISTS (SELECT 1 FROM dbo.tblContactPhones c WHERE c.PhoneE164 = a.PhoneE164);
+
+DROP TABLE #admin_phone_decisions;
+
+COMMIT TRANSACTION;
+GO
+
+-- Rollback: DROP INDEX UX_tblAdmins_PhoneE164 ON dbo.tblAdmins;
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_tblAdmins_PhoneE164' AND object_id = OBJECT_ID(N'dbo.tblAdmins')
+)
+    CREATE UNIQUE INDEX UX_tblAdmins_PhoneE164
+        ON dbo.tblAdmins (PhoneE164)
+        WHERE PhoneE164 IS NOT NULL AND Void = 0;
+GO
+
+
 IF NOT EXISTS (SELECT 1 FROM dbo.tblAdmins WHERE Username = N'admin')
 INSERT INTO dbo.tblAdmins (Username, PasswordHash, PasswordSalt, PasswordIterations, IsActive)
 VALUES (
@@ -420,6 +698,25 @@ GO
 
 IF COL_LENGTH(N'dbo.tblPlayers', N'AvatarStorageKey') IS NULL
     ALTER TABLE dbo.tblPlayers ADD AvatarStorageKey NVARCHAR(512) NULL;
+GO
+-- Player phone columns. Rollback: drop UX_tblPlayers_PhoneE164 first, then
+-- ALTER TABLE dbo.tblPlayers DROP COLUMN PhoneE164, PhoneNumber, PhoneCode;
+IF COL_LENGTH(N'dbo.tblPlayers', N'PhoneCode') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD PhoneCode NVARCHAR(8) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblPlayers', N'PhoneNumber') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD PhoneNumber NVARCHAR(20) NULL;
+GO
+IF COL_LENGTH(N'dbo.tblPlayers', N'PhoneE164') IS NULL
+    ALTER TABLE dbo.tblPlayers ADD PhoneE164 VARCHAR(16) NULL;
+GO
+IF NOT EXISTS (
+    SELECT 1 FROM sys.indexes
+    WHERE name = N'UX_tblPlayers_PhoneE164' AND object_id = OBJECT_ID(N'dbo.tblPlayers')
+)
+    CREATE UNIQUE INDEX UX_tblPlayers_PhoneE164
+        ON dbo.tblPlayers (PhoneE164)
+        WHERE PhoneE164 IS NOT NULL AND Void = 0;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name = N'FK_tblPlayers_tblSeasons_Debut')
