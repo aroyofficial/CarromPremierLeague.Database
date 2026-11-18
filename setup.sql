@@ -674,6 +674,7 @@ CREATE TABLE dbo.tblSettings (
     AssistantEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantEnabled DEFAULT 1,
     AssistantPublicEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantPublicEnabled DEFAULT 1,
     AssistantAdminEnabled BIT NOT NULL CONSTRAINT DF_tblSettings_AssistantAdminEnabled DEFAULT 1,
+    StartOnScheduledDay BIT NOT NULL CONSTRAINT DF_tblSettings_StartOnScheduledDay DEFAULT 0,
     UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblSettings_UpdatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT CK_tblSettings_SingleRow CHECK (Id = 1),
     CONSTRAINT CK_tblSettings_RegulationMinutes CHECK (RegulationMinutes BETWEEN 5 AND 30),
@@ -695,9 +696,13 @@ BEGIN
 END
 GO
 
+IF COL_LENGTH(N'dbo.tblSettings', N'StartOnScheduledDay') IS NULL
+    ALTER TABLE dbo.tblSettings ADD StartOnScheduledDay BIT NOT NULL CONSTRAINT DF_tblSettings_StartOnScheduledDay DEFAULT 0;
+GO
+
 IF NOT EXISTS (SELECT 1 FROM dbo.tblSettings WHERE Id = 1)
-INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover, AssistantEnabled, AssistantPublicEnabled, AssistantAdminEnabled)
-VALUES (1, 15, 5, 0, 0, 1, 1, 1);
+INSERT INTO dbo.tblSettings (Id, RegulationMinutes, ExtraMinutes, LeagueQueen, QueenNeedsCover, AssistantEnabled, AssistantPublicEnabled, AssistantAdminEnabled, StartOnScheduledDay)
+VALUES (1, 15, 5, 0, 0, 1, 1, 1, 0);
 GO
 
 
