@@ -1693,6 +1693,17 @@ CREATE TABLE dbo.tblPushSubscriptions (
 );
 GO
 
+-- LastSuccessAt: the last time the push service accepted a message for this device. A success
+-- clears FailureCount, so only consecutive failures can void a device.
+-- NotifySyncProblem: a signed-in admin's device hears when one of their calendar connections needs
+-- them to connect again. Only that admin's own devices get it.
+IF COL_LENGTH(N'dbo.tblPushSubscriptions', N'LastSuccessAt') IS NULL
+    ALTER TABLE dbo.tblPushSubscriptions ADD LastSuccessAt DATETIME2(6) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblPushSubscriptions', N'NotifySyncProblem') IS NULL
+    ALTER TABLE dbo.tblPushSubscriptions ADD NotifySyncProblem BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifySyncProblem DEFAULT 1;
+GO
 IF OBJECT_ID(N'dbo.tblCalendarFeeds', N'U') IS NULL
 CREATE TABLE dbo.tblCalendarFeeds (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCalendarFeeds PRIMARY KEY,
@@ -1749,6 +1760,12 @@ GO
 -- map must outlive the row so the calendar event can still be withdrawn.
 IF OBJECT_ID(N'dbo.FK_tblCalendarEventMaps_tblMatches', N'F') IS NOT NULL
     ALTER TABLE dbo.tblCalendarEventMaps DROP CONSTRAINT FK_tblCalendarEventMaps_tblMatches;
+GO
+
+-- Withdrawn: the admin removed this match from this connected calendar. Later writes skip it
+-- until the admin adds it back.
+IF COL_LENGTH(N'dbo.tblCalendarEventMaps', N'Withdrawn') IS NULL
+    ALTER TABLE dbo.tblCalendarEventMaps ADD Withdrawn BIT NOT NULL CONSTRAINT DF_tblCalendarEventMaps_Withdrawn DEFAULT 0;
 GO
 
 IF OBJECT_ID(N'dbo.tblNotificationOutbox', N'U') IS NULL
