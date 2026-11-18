@@ -86,9 +86,19 @@ CREATE TABLE dbo.tblAdminSessions (
     DeviceId VARCHAR(64) NOT NULL,
     DeviceLabel NVARCHAR(160) NOT NULL,
     ExpiresAt DATETIME2(6) NOT NULL,
+    LastSeenAt DATETIME2(6) NULL,
     CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblAdminSessions_CreatedAt DEFAULT SYSUTCDATETIME(),
     CONSTRAINT FK_tblAdminSessions_tblAdmins FOREIGN KEY (AdminId) REFERENCES dbo.tblAdmins(Id)
 );
+GO
+
+IF COL_LENGTH(N'dbo.tblAdminSessions', N'LastSeenAt') IS NULL
+    ALTER TABLE dbo.tblAdminSessions ADD LastSeenAt DATETIME2(6) NULL;
+GO
+
+UPDATE dbo.tblAdminSessions
+SET LastSeenAt = SYSUTCDATETIME()
+WHERE LastSeenAt IS NULL;
 GO
 
 IF OBJECT_ID(N'dbo.tblAdminLoginRequests', N'U') IS NULL
