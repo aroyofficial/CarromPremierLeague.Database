@@ -1414,6 +1414,131 @@ BEGIN
     SELECT @SeasonStatus AS SeasonStatus;
 END
 GO
+
+-- Match alerts and calendar subscriptions. Rollback without deleting data: turn the
+-- CPL_PUSH_ENABLED, CPL_CALENDAR_FEED_ENABLED, CPL_GOOGLE_CALENDAR_ENABLED, and
+-- CPL_MICROSOFT_CALENDAR_ENABLED environment flags off and restart the API.
+-- Dropping these tables removes subscriptions, feeds, and queued notices only.
+IF OBJECT_ID(N'dbo.tblPushSubscriptions', N'U') IS NULL
+CREATE TABLE dbo.tblPushSubscriptions (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblPushSubscriptions PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPushSubscriptions_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblPushSubscriptions_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_Void DEFAULT 0,
+    AdminId BIGINT NULL,
+    Endpoint NVARCHAR(2000) NOT NULL,
+    EndpointHash CHAR(64) NOT NULL,
+    P256dh NVARCHAR(255) NOT NULL,
+    AuthSecret NVARCHAR(255) NOT NULL,
+    SeasonId BIGINT NULL,
+    TeamId BIGINT NULL,
+    UserAgent NVARCHAR(400) NULL,
+    FailureCount INT NOT NULL CONSTRAINT DF_tblPushSubscriptions_FailureCount DEFAULT 0,
+    NotifyScheduled BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyScheduled DEFAULT 1,
+    NotifyChanged BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyChanged DEFAULT 1,
+    NotifyCancelled BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyCancelled DEFAULT 1,
+    NotifyLive BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyLive DEFAULT 1,
+    NotifyEnded BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyEnded DEFAULT 1,
+    NotifyScore BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyScore DEFAULT 1,
+    NotifyReminder BIT NOT NULL CONSTRAINT DF_tblPushSubscriptions_NotifyReminder DEFAULT 1,
+    CONSTRAINT UQ_tblPushSubscriptions_EndpointHash UNIQUE (EndpointHash),
+    CONSTRAINT FK_tblPushSubscriptions_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id),
+    CONSTRAINT FK_tblPushSubscriptions_tblTeams FOREIGN KEY (TeamId) REFERENCES dbo.tblTeams(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblCalendarFeeds', N'U') IS NULL
+CREATE TABLE dbo.tblCalendarFeeds (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCalendarFeeds PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarFeeds_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarFeeds_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblCalendarFeeds_Void DEFAULT 0,
+    Token NVARCHAR(80) NOT NULL,
+    SeasonId BIGINT NOT NULL,
+    TeamId BIGINT NULL,
+    Label NVARCHAR(120) NOT NULL,
+    CONSTRAINT UQ_tblCalendarFeeds_Token UNIQUE (Token),
+    CONSTRAINT FK_tblCalendarFeeds_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id),
+    CONSTRAINT FK_tblCalendarFeeds_tblTeams FOREIGN KEY (TeamId) REFERENCES dbo.tblTeams(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblCalendarConnections', N'U') IS NULL
+CREATE TABLE dbo.tblCalendarConnections (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCalendarConnections PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarConnections_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarConnections_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblCalendarConnections_Void DEFAULT 0,
+    AdminId BIGINT NOT NULL,
+    Provider VARCHAR(16) NOT NULL,
+    ExternalCalendarId NVARCHAR(400) NOT NULL,
+    RefreshToken NVARCHAR(MAX) NOT NULL,
+    Status VARCHAR(16) NOT NULL CONSTRAINT DF_tblCalendarConnections_Status DEFAULT 'active',
+    CONSTRAINT CK_tblCalendarConnections_Provider CHECK (Provider IN ('google', 'microsoft')),
+    CONSTRAINT CK_tblCalendarConnections_Status CHECK (Status IN ('active', 'replaced', 'revoked'))
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'UQ_tblCalendarConnections_Active' AND object_id = OBJECT_ID(N'dbo.tblCalendarConnections'))
+    CREATE UNIQUE INDEX UQ_tblCalendarConnections_Active
+        ON dbo.tblCalendarConnections (AdminId, Provider)
+        WHERE Void = 0;
+GO
+
+IF OBJECT_ID(N'dbo.tblCalendarEventMaps', N'U') IS NULL
+CREATE TABLE dbo.tblCalendarEventMaps (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblCalendarEventMaps PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarEventMaps_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblCalendarEventMaps_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    ConnectionId BIGINT NOT NULL,
+    MatchId BIGINT NOT NULL,
+    ExternalEventId NVARCHAR(400) NOT NULL,
+    ContentHash CHAR(64) NOT NULL,
+    CONSTRAINT UQ_tblCalendarEventMaps_Connection_Match UNIQUE (ConnectionId, MatchId),
+    CONSTRAINT FK_tblCalendarEventMaps_tblCalendarConnections FOREIGN KEY (ConnectionId) REFERENCES dbo.tblCalendarConnections(Id)
+);
+GO
+
+-- MatchId has no foreign key: a season schedule rebuild deletes unplayed matches, and the
+-- map must outlive the row so the calendar event can still be withdrawn.
+IF OBJECT_ID(N'dbo.FK_tblCalendarEventMaps_tblMatches', N'F') IS NOT NULL
+    ALTER TABLE dbo.tblCalendarEventMaps DROP CONSTRAINT FK_tblCalendarEventMaps_tblMatches;
+GO
+
+IF OBJECT_ID(N'dbo.tblNotificationOutbox', N'U') IS NULL
+CREATE TABLE dbo.tblNotificationOutbox (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblNotificationOutbox PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblNotificationOutbox_CreatedAt DEFAULT SYSUTCDATETIME(),
+    MatchId BIGINT NOT NULL,
+    EventType VARCHAR(32) NOT NULL,
+    IdempotencyKey NVARCHAR(200) NOT NULL,
+    Payload NVARCHAR(MAX) NOT NULL,
+    Status VARCHAR(16) NOT NULL CONSTRAINT DF_tblNotificationOutbox_Status DEFAULT 'pending',
+    Attempts INT NOT NULL CONSTRAINT DF_tblNotificationOutbox_Attempts DEFAULT 0,
+    AvailableAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblNotificationOutbox_AvailableAt DEFAULT SYSUTCDATETIME(),
+    LastError NVARCHAR(400) NULL,
+    CONSTRAINT UQ_tblNotificationOutbox_Key UNIQUE (IdempotencyKey),
+    CONSTRAINT CK_tblNotificationOutbox_Status CHECK (Status IN ('pending', 'leased', 'done', 'dead'))
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblNotificationOutbox_Pending' AND object_id = OBJECT_ID(N'dbo.tblNotificationOutbox'))
+    CREATE INDEX IX_tblNotificationOutbox_Pending
+        ON dbo.tblNotificationOutbox (Status, AvailableAt, Id);
+GO
+
+IF OBJECT_ID(N'dbo.tblNotificationDeliveries', N'U') IS NULL
+CREATE TABLE dbo.tblNotificationDeliveries (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblNotificationDeliveries PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblNotificationDeliveries_CreatedAt DEFAULT SYSUTCDATETIME(),
+    OutboxId BIGINT NOT NULL,
+    Channel VARCHAR(16) NOT NULL,
+    Target NVARCHAR(200) NOT NULL CONSTRAINT DF_tblNotificationDeliveries_Target DEFAULT '',
+    Status VARCHAR(16) NOT NULL,
+    Detail NVARCHAR(400) NULL,
+    CONSTRAINT FK_tblNotificationDeliveries_tblNotificationOutbox FOREIGN KEY (OutboxId) REFERENCES dbo.tblNotificationOutbox(Id)
+);
+GO
 '@)
 $sections.Add("-- No SQL Server triggers are currently declared.")
 
