@@ -721,7 +721,7 @@ CREATE TABLE dbo.tblGalleryItems (
     Height INT NOT NULL,
     Caption NVARCHAR(500) NULL,
     AltText NVARCHAR(300) NULL,
-    TakenOn DATE NULL,
+    TakenOn DATETIME2(0) NULL,
     IsPublished BIT NOT NULL CONSTRAINT DF_tblGalleryItems_IsPublished DEFAULT 0,
     CreatedBy BIGINT NULL,
     UpdatedBy BIGINT NULL,
@@ -763,6 +763,17 @@ GO
 
 IF COL_LENGTH(N'dbo.tblGalleryItems', N'SortOrder') IS NULL
     ALTER TABLE dbo.tblGalleryItems ADD SortOrder INT NOT NULL CONSTRAINT DF_tblGalleryItems_SortOrder DEFAULT 0;
+GO
+
+-- Existing galleries stored a date. Widen it so a photo or video can keep the time it was taken.
+IF EXISTS (
+    SELECT 1
+    FROM sys.columns
+    WHERE object_id = OBJECT_ID(N'dbo.tblGalleryItems')
+      AND name = N'TakenOn'
+      AND system_type_id = TYPE_ID(N'date')
+)
+    ALTER TABLE dbo.tblGalleryItems ALTER COLUMN TakenOn DATETIME2(0) NULL;
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblGalleryItems_LibraryOrder' AND object_id = OBJECT_ID(N'dbo.tblGalleryItems'))

@@ -12,7 +12,7 @@ CREATE TABLE dbo.tblGalleryItems (
     Height INT NOT NULL,
     Caption NVARCHAR(500) NULL,
     AltText NVARCHAR(300) NULL,
-    TakenOn DATE NULL,
+    TakenOn DATETIME2(0) NULL,
     IsPublished BIT NOT NULL CONSTRAINT DF_tblGalleryItems_IsPublished DEFAULT 0,
     CreatedBy BIGINT NULL,
     UpdatedBy BIGINT NULL
