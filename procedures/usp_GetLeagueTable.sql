@@ -14,7 +14,17 @@ BEGIN
     WHERE SeasonId = p_SeasonId
       AND Void = 0;
 
-    IF v_TotalMatches = 0 THEN
+    IF EXISTS (
+        SELECT 1 FROM tblMatches
+        WHERE SeasonId = p_SeasonId
+          AND Category = 2
+          AND Status = 3
+          AND Outcome IN (1, 2)
+          AND Void = 0
+    ) THEN
+        SET v_SeasonStatus = 3;
+
+    ELSEIF v_TotalMatches = 0 THEN
         SET v_SeasonStatus = 1;
 
     ELSEIF EXISTS (
