@@ -50,6 +50,18 @@
 		},
 		"tblGalleryItemSeasons": {
 			"tables": ["tblGalleryItems", "tblSeasons"]
+		},
+		"tblApiApps": {
+			"tables": ["tblAdmins"]
+		},
+		"tblApiAppPermissions": {
+			"tables": ["tblApiApps", "tblPermissions"]
+		},
+		"tblWebhooks": {
+			"tables": ["tblAdmins"]
+		},
+		"tblWebhookDeliveries": {
+			"tables": ["tblWebhooks"]
 		}
 	},
 	"functions": {},

@@ -982,6 +982,8 @@ USING (VALUES
     ('admins.delete', N'Admin users', N'Delete admin users', N'Remove another admin user.', 740),
     ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810),
     ('assistant.use', N'Striker assistant', N'Use Striker', N'Open the Striker chat in this console. Striker still follows every other permission you hold.', 910),
+    ('webhooks.manage', N'Webhooks', N'Manage webhooks', N'Create, edit, test and delete outbound webhooks.', 920),
+    ('apps.manage', N'Apps and API keys', N'Manage apps', N'Create, rotate and revoke API keys within the permissions you hold.', 930),
     ('gallery.create', N'Gallery', N'Add gallery photos', N'Upload a photo or save a public image link as a draft.', 650),
     ('gallery.update', N'Gallery', N'Edit gallery photos', N'Change captions, seasons, order and covers.', 660),
     ('gallery.publish', N'Gallery', N'Publish gallery photos', N'Make a draft photo visible on the public gallery.', 670),
@@ -1105,7 +1107,9 @@ USING (VALUES
     ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
     ('gallery', 'media', N'Gallery', N'Season photos.', 'Picture', 55),
     ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90),
-    ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95)
+    ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95),
+    ('webhooks', 'administration', N'Webhooks', N'Outbound HTTP callbacks when league or match events happen.', 'Connection', 96),
+    ('apps', 'administration', N'Apps and API keys', N'API keys for external apps and integrations.', 'Key', 97)
 ) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
@@ -1144,6 +1148,8 @@ JOIN (VALUES
     ('admins.delete', 'admins', 'admins.view'),
     ('permissions.manage', 'permissions', NULL),
     ('assistant.use', 'assistant', NULL),
+    ('webhooks.manage', 'webhooks', NULL),
+    ('apps.manage', 'apps', NULL),
     ('gallery.create', 'gallery', NULL),
     ('gallery.update', 'gallery', NULL),
     ('gallery.publish', 'gallery', 'gallery.update'),
@@ -1160,7 +1166,8 @@ USING (VALUES
     ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
     ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40),
     ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50),
-    ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60)
+    ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60),
+    ('integration_manager', N'Integration manager', N'Manages outbound webhooks and external app API keys.', 70)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -1193,12 +1200,14 @@ USING (VALUES
     ('gallery_curator', 'gallery.update'),
     ('gallery_curator', 'gallery.publish'),
     ('gallery_curator', 'gallery.delete'),
-    ('assistant_user', 'assistant.use')
+    ('assistant_user', 'assistant.use'),
+    ('integration_manager', 'webhooks.manage'),
+    ('integration_manager', 'apps.manage')
 ) AS source (RoleCode, PermissionCode)
     ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
-WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator', 'assistant_user') THEN
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator', 'assistant_user', 'integration_manager') THEN
     DELETE;
 GO
 
@@ -1568,6 +1577,92 @@ CREATE TABLE dbo.tblNotificationDeliveries (
     Detail NVARCHAR(400) NULL,
     CONSTRAINT FK_tblNotificationDeliveries_tblNotificationOutbox FOREIGN KEY (OutboxId) REFERENCES dbo.tblNotificationOutbox(Id)
 );
+GO
+
+-- External integration apps (scoped API keys) and outbound webhooks.
+-- Rollback: DROP TABLE dbo.tblWebhookDeliveries, dbo.tblWebhooks, dbo.tblApiAppPermissions, dbo.tblApiApps;
+IF OBJECT_ID(N'dbo.tblApiApps', N'U') IS NULL
+CREATE TABLE dbo.tblApiApps (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblApiApps PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblApiApps_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblApiApps_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblApiApps_Void DEFAULT 0,
+    Name NVARCHAR(120) NOT NULL,
+    Description NVARCHAR(400) NULL,
+    KeyPrefix VARCHAR(24) NOT NULL,
+    KeyHash CHAR(64) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblApiApps_IsActive DEFAULT 1,
+    ExpiresAt DATETIME2(6) NULL,
+    LastUsedAt DATETIME2(6) NULL,
+    RevokedAt DATETIME2(6) NULL,
+    CreatedBy BIGINT NOT NULL,
+    CONSTRAINT UQ_tblApiApps_KeyHash UNIQUE (KeyHash),
+    CONSTRAINT FK_tblApiApps_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblApiAppPermissions', N'U') IS NULL
+CREATE TABLE dbo.tblApiAppPermissions (
+    AppId BIGINT NOT NULL,
+    PermissionCode VARCHAR(64) NOT NULL,
+    CONSTRAINT PK_tblApiAppPermissions PRIMARY KEY (AppId, PermissionCode),
+    CONSTRAINT FK_tblApiAppPermissions_tblApiApps FOREIGN KEY (AppId) REFERENCES dbo.tblApiApps(Id),
+    CONSTRAINT FK_tblApiAppPermissions_tblPermissions FOREIGN KEY (PermissionCode) REFERENCES dbo.tblPermissions(Code)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblWebhooks', N'U') IS NULL
+CREATE TABLE dbo.tblWebhooks (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWebhooks PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhooks_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhooks_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblWebhooks_Void DEFAULT 0,
+    Name NVARCHAR(120) NOT NULL,
+    Url NVARCHAR(2000) NOT NULL,
+    Description NVARCHAR(400) NULL,
+    SecretCiphertext NVARCHAR(512) NOT NULL,
+    SecretHint VARCHAR(24) NOT NULL,
+    Events NVARCHAR(1000) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblWebhooks_IsActive DEFAULT 1,
+    FailureCount INT NOT NULL CONSTRAINT DF_tblWebhooks_FailureCount DEFAULT 0,
+    LastDeliveredAt DATETIME2(6) NULL,
+    LastStatusCode INT NULL,
+    LastError NVARCHAR(400) NULL,
+    CreatedBy BIGINT NOT NULL,
+    CONSTRAINT FK_tblWebhooks_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblWebhookDeliveries', N'U') IS NULL
+CREATE TABLE dbo.tblWebhookDeliveries (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWebhookDeliveries PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_CreatedAt DEFAULT SYSUTCDATETIME(),
+    WebhookId BIGINT NOT NULL,
+    EventId VARCHAR(64) NOT NULL,
+    EventType VARCHAR(64) NOT NULL,
+    IdempotencyKey NVARCHAR(200) NOT NULL,
+    Payload NVARCHAR(MAX) NOT NULL,
+    Status VARCHAR(16) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_Status DEFAULT 'pending',
+    Attempts INT NOT NULL CONSTRAINT DF_tblWebhookDeliveries_Attempts DEFAULT 0,
+    AvailableAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_AvailableAt DEFAULT SYSUTCDATETIME(),
+    ResponseStatus INT NULL,
+    DurationMs INT NULL,
+    ErrorDetail NVARCHAR(400) NULL,
+    DeliveredAt DATETIME2(6) NULL,
+    CONSTRAINT FK_tblWebhookDeliveries_tblWebhooks FOREIGN KEY (WebhookId) REFERENCES dbo.tblWebhooks(Id),
+    CONSTRAINT UQ_tblWebhookDeliveries_Webhook_Key UNIQUE (WebhookId, IdempotencyKey),
+    CONSTRAINT CK_tblWebhookDeliveries_Status CHECK (Status IN ('pending', 'leased', 'sent', 'failed', 'dead'))
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWebhookDeliveries_Pending' AND object_id = OBJECT_ID(N'dbo.tblWebhookDeliveries'))
+    CREATE INDEX IX_tblWebhookDeliveries_Pending
+        ON dbo.tblWebhookDeliveries (Status, AvailableAt, Id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWebhookDeliveries_Webhook' AND object_id = OBJECT_ID(N'dbo.tblWebhookDeliveries'))
+    CREATE INDEX IX_tblWebhookDeliveries_Webhook
+        ON dbo.tblWebhookDeliveries (WebhookId, Id DESC);
 GO
 '@)
 $sections.Add("-- No SQL Server triggers are currently declared.")

@@ -635,14 +635,6 @@ CREATE TABLE dbo.tblMatches (
 );
 GO
 
-IF COL_LENGTH(N'dbo.tblMatches', N'StartedAt') IS NULL
-    ALTER TABLE dbo.tblMatches ADD StartedAt DATETIME2(6) NULL;
-GO
-
-IF COL_LENGTH(N'dbo.tblMatches', N'ExtraStartedAt') IS NULL
-    ALTER TABLE dbo.tblMatches ADD ExtraStartedAt DATETIME2(6) NULL;
-GO
-
 IF OBJECT_ID(N'dbo.tblMatchStats', N'U') IS NULL
 CREATE TABLE dbo.tblMatchStats (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblMatchStats PRIMARY KEY,
@@ -652,9 +644,6 @@ CREATE TABLE dbo.tblMatchStats (
     MatchId BIGINT NOT NULL,
     PlayerId BIGINT NOT NULL,
     CoinsPocketed TINYINT NULL,
-    OpponentCoinsPocketed TINYINT NULL,
-    SingleFines TINYINT NULL,
-    DoubleFines TINYINT NULL,
     StrikersPocketed TINYINT NULL,
     CoinsFined TINYINT NULL,
     ShotsTaken TINYINT NULL,
@@ -852,6 +841,8 @@ USING (VALUES
     ('admins.delete', N'Admin users', N'Delete admin users', N'Remove another admin user.', 740),
     ('permissions.manage', N'Permissions', N'Manage permissions', N'Grant and revoke permissions you hold for any admin user.', 810),
     ('assistant.use', N'Striker assistant', N'Use Striker', N'Open the Striker chat in this console. Striker still follows every other permission you hold.', 910),
+    ('webhooks.manage', N'Webhooks', N'Manage webhooks', N'Create, edit, test and delete outbound webhooks.', 920),
+    ('apps.manage', N'Apps and API keys', N'Manage apps', N'Create, rotate and revoke API keys within the permissions you hold.', 930),
     ('gallery.create', N'Gallery', N'Add gallery photos', N'Upload a photo or save a public image link as a draft.', 650),
     ('gallery.update', N'Gallery', N'Edit gallery photos', N'Change captions, seasons, order and covers.', 660),
     ('gallery.publish', N'Gallery', N'Publish gallery photos', N'Make a draft photo visible on the public gallery.', 670),
@@ -975,7 +966,9 @@ USING (VALUES
     ('admins', 'administration', N'Admin users', N'Accounts that can sign in to this console.', 'UserFilled', 80),
     ('gallery', 'media', N'Gallery', N'Season photos.', 'Picture', 55),
     ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90),
-    ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95)
+    ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95),
+    ('webhooks', 'administration', N'Webhooks', N'Outbound HTTP callbacks when league or match events happen.', 'Connection', 96),
+    ('apps', 'administration', N'Apps and API keys', N'API keys for external apps and integrations.', 'Key', 97)
 ) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
@@ -1014,6 +1007,8 @@ JOIN (VALUES
     ('admins.delete', 'admins', 'admins.view'),
     ('permissions.manage', 'permissions', NULL),
     ('assistant.use', 'assistant', NULL),
+    ('webhooks.manage', 'webhooks', NULL),
+    ('apps.manage', 'apps', NULL),
     ('gallery.create', 'gallery', NULL),
     ('gallery.update', 'gallery', NULL),
     ('gallery.publish', 'gallery', 'gallery.update'),
@@ -1030,7 +1025,8 @@ USING (VALUES
     ('content_editor', N'League content editor', N'Keeps teams, players, countries and rosters up to date.', 30),
     ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40),
     ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50),
-    ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60)
+    ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60),
+    ('integration_manager', N'Integration manager', N'Manages outbound webhooks and external app API keys.', 70)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -1063,12 +1059,14 @@ USING (VALUES
     ('gallery_curator', 'gallery.update'),
     ('gallery_curator', 'gallery.publish'),
     ('gallery_curator', 'gallery.delete'),
-    ('assistant_user', 'assistant.use')
+    ('assistant_user', 'assistant.use'),
+    ('integration_manager', 'webhooks.manage'),
+    ('integration_manager', 'apps.manage')
 ) AS source (RoleCode, PermissionCode)
     ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
 WHEN NOT MATCHED BY TARGET THEN
     INSERT (RoleCode, PermissionCode) VALUES (source.RoleCode, source.PermissionCode)
-WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator', 'assistant_user') THEN
+WHEN NOT MATCHED BY SOURCE AND target.RoleCode IN ('match_day', 'season_planner', 'content_editor', 'account_manager', 'gallery_curator', 'assistant_user', 'integration_manager') THEN
     DELETE;
 GO
 
@@ -1094,78 +1092,6 @@ WHERE a.Username = N'admin' AND a.Void = 0
       SELECT 1 FROM dbo.tblAdminPermissions held
       WHERE held.AdminId = a.Id AND held.PermissionCode = p.Code
   );
-GO
-
-IF COL_LENGTH(N'dbo.tblMatchStats', N'OpponentCoinsPocketed') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD OpponentCoinsPocketed TINYINT NULL;
-GO
-
-IF COL_LENGTH(N'dbo.tblMatchStats', N'SingleFines') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD SingleFines TINYINT NULL;
-GO
-
-IF COL_LENGTH(N'dbo.tblMatchStats', N'DoubleFines') IS NULL
-    ALTER TABLE dbo.tblMatchStats ADD DoubleFines TINYINT NULL;
-GO
-
--- A fine puts one of the team's pocketed coins back on the board, where it can be pocketed again.
--- A fine the team cannot pay yet is due and returns nothing. So a colour never has more than
--- max(0, own coins - fined coins) + the other team's opponent coins of that colour off the board.
-CREATE OR ALTER TRIGGER dbo.TR_tblMatchStats_NineCoins
-ON dbo.tblMatchStats
-AFTER INSERT, UPDATE
-AS
-BEGIN
-    SET NOCOUNT ON;
-
-    IF EXISTS (
-        SELECT 1
-        FROM inserted AS entered
-        INNER JOIN dbo.tblMatches AS m ON m.Id = entered.MatchId
-        LEFT JOIN dbo.tblPlayersSeasonsTeams AS pst
-            ON pst.PlayerId = entered.PlayerId
-           AND pst.SeasonId = m.SeasonId
-           AND pst.Void = 0
-           AND pst.TeamId IN (m.Team1, m.Team2)
-        WHERE entered.Void = 0
-          AND pst.PlayerId IS NULL
-    )
-    BEGIN
-        THROW 50020, 'A scorecard player must belong to one of the two teams in the match.', 1;
-    END;
-
-    DECLARE @overflow INT = 0;
-
-    ;WITH sides AS (
-        SELECT
-            m.Id AS MatchId,
-            pst.TeamId,
-            SUM(ISNULL(ms.CoinsPocketed, 0)) AS OwnCoins,
-            SUM(ISNULL(ms.OpponentCoinsPocketed, 0)) AS OpponentCoins,
-            SUM(ISNULL(ms.CoinsFined, 0)) AS FinedCoins
-        FROM dbo.tblMatches AS m
-        INNER JOIN dbo.tblMatchStats AS ms ON ms.MatchId = m.Id AND ms.Void = 0
-        INNER JOIN dbo.tblPlayersSeasonsTeams AS pst
-            ON pst.PlayerId = ms.PlayerId
-           AND pst.SeasonId = m.SeasonId
-           AND pst.Void = 0
-        WHERE m.Id IN (SELECT DISTINCT MatchId FROM inserted)
-          AND pst.TeamId IN (m.Team1, m.Team2)
-        GROUP BY m.Id, pst.TeamId
-    )
-    SELECT @overflow = COUNT(*)
-    FROM sides AS mine
-    LEFT JOIN sides AS theirs
-        ON theirs.MatchId = mine.MatchId
-       AND theirs.TeamId <> mine.TeamId
-    WHERE CASE WHEN mine.OwnCoins > mine.FinedCoins THEN mine.OwnCoins - mine.FinedCoins ELSE 0 END
-        + ISNULL(theirs.OpponentCoins, 0) > 9;
-
-    IF @overflow > 0
-    BEGIN
-        THROW 50021, 'Each colour has only 9 coins off the board after fines.', 1;
-    END;
-END;
 GO
 
 -- Seed data follows table dependency order.
@@ -1505,6 +1431,12 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM dbo.tblPlayers WHERE Id = @p_PlayerId AND Void = 0) THROW 50001, 'Invalid PlayerId', 1;
     IF NOT EXISTS (SELECT 1 FROM dbo.tblTeams WHERE Id = @p_TeamId AND Void = 0) THROW 50002, 'Invalid TeamId', 1;
     IF NOT EXISTS (SELECT 1 FROM dbo.tblSeasons WHERE Id = @p_SeasonId AND Void = 0) THROW 50003, 'Invalid SeasonId', 1;
+    IF (
+        SELECT COUNT(*)
+        FROM dbo.tblPlayersSeasonsTeams
+        WHERE SeasonId = @p_SeasonId AND TeamId = @p_TeamId AND PlayerId <> @p_PlayerId AND Void = 0
+    ) >= 2
+        THROW 50004, 'A team can have at most two players.', 1;
 
     MERGE dbo.tblPlayersSeasonsTeams AS target
     USING (SELECT @p_PlayerId AS PlayerId, @p_SeasonId AS SeasonId, @p_TeamId AS TeamId) AS source
@@ -1814,6 +1746,92 @@ CREATE TABLE dbo.tblNotificationDeliveries (
     Detail NVARCHAR(400) NULL,
     CONSTRAINT FK_tblNotificationDeliveries_tblNotificationOutbox FOREIGN KEY (OutboxId) REFERENCES dbo.tblNotificationOutbox(Id)
 );
+GO
+
+-- External integration apps (scoped API keys) and outbound webhooks.
+-- Rollback: DROP TABLE dbo.tblWebhookDeliveries, dbo.tblWebhooks, dbo.tblApiAppPermissions, dbo.tblApiApps;
+IF OBJECT_ID(N'dbo.tblApiApps', N'U') IS NULL
+CREATE TABLE dbo.tblApiApps (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblApiApps PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblApiApps_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblApiApps_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblApiApps_Void DEFAULT 0,
+    Name NVARCHAR(120) NOT NULL,
+    Description NVARCHAR(400) NULL,
+    KeyPrefix VARCHAR(24) NOT NULL,
+    KeyHash CHAR(64) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblApiApps_IsActive DEFAULT 1,
+    ExpiresAt DATETIME2(6) NULL,
+    LastUsedAt DATETIME2(6) NULL,
+    RevokedAt DATETIME2(6) NULL,
+    CreatedBy BIGINT NOT NULL,
+    CONSTRAINT UQ_tblApiApps_KeyHash UNIQUE (KeyHash),
+    CONSTRAINT FK_tblApiApps_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblApiAppPermissions', N'U') IS NULL
+CREATE TABLE dbo.tblApiAppPermissions (
+    AppId BIGINT NOT NULL,
+    PermissionCode VARCHAR(64) NOT NULL,
+    CONSTRAINT PK_tblApiAppPermissions PRIMARY KEY (AppId, PermissionCode),
+    CONSTRAINT FK_tblApiAppPermissions_tblApiApps FOREIGN KEY (AppId) REFERENCES dbo.tblApiApps(Id),
+    CONSTRAINT FK_tblApiAppPermissions_tblPermissions FOREIGN KEY (PermissionCode) REFERENCES dbo.tblPermissions(Code)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblWebhooks', N'U') IS NULL
+CREATE TABLE dbo.tblWebhooks (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWebhooks PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhooks_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhooks_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Void BIT NOT NULL CONSTRAINT DF_tblWebhooks_Void DEFAULT 0,
+    Name NVARCHAR(120) NOT NULL,
+    Url NVARCHAR(2000) NOT NULL,
+    Description NVARCHAR(400) NULL,
+    SecretCiphertext NVARCHAR(512) NOT NULL,
+    SecretHint VARCHAR(24) NOT NULL,
+    Events NVARCHAR(1000) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblWebhooks_IsActive DEFAULT 1,
+    FailureCount INT NOT NULL CONSTRAINT DF_tblWebhooks_FailureCount DEFAULT 0,
+    LastDeliveredAt DATETIME2(6) NULL,
+    LastStatusCode INT NULL,
+    LastError NVARCHAR(400) NULL,
+    CreatedBy BIGINT NOT NULL,
+    CONSTRAINT FK_tblWebhooks_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF OBJECT_ID(N'dbo.tblWebhookDeliveries', N'U') IS NULL
+CREATE TABLE dbo.tblWebhookDeliveries (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWebhookDeliveries PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_CreatedAt DEFAULT SYSUTCDATETIME(),
+    WebhookId BIGINT NOT NULL,
+    EventId VARCHAR(64) NOT NULL,
+    EventType VARCHAR(64) NOT NULL,
+    IdempotencyKey NVARCHAR(200) NOT NULL,
+    Payload NVARCHAR(MAX) NOT NULL,
+    Status VARCHAR(16) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_Status DEFAULT 'pending',
+    Attempts INT NOT NULL CONSTRAINT DF_tblWebhookDeliveries_Attempts DEFAULT 0,
+    AvailableAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWebhookDeliveries_AvailableAt DEFAULT SYSUTCDATETIME(),
+    ResponseStatus INT NULL,
+    DurationMs INT NULL,
+    ErrorDetail NVARCHAR(400) NULL,
+    DeliveredAt DATETIME2(6) NULL,
+    CONSTRAINT FK_tblWebhookDeliveries_tblWebhooks FOREIGN KEY (WebhookId) REFERENCES dbo.tblWebhooks(Id),
+    CONSTRAINT UQ_tblWebhookDeliveries_Webhook_Key UNIQUE (WebhookId, IdempotencyKey),
+    CONSTRAINT CK_tblWebhookDeliveries_Status CHECK (Status IN ('pending', 'leased', 'sent', 'failed', 'dead'))
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWebhookDeliveries_Pending' AND object_id = OBJECT_ID(N'dbo.tblWebhookDeliveries'))
+    CREATE INDEX IX_tblWebhookDeliveries_Pending
+        ON dbo.tblWebhookDeliveries (Status, AvailableAt, Id);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWebhookDeliveries_Webhook' AND object_id = OBJECT_ID(N'dbo.tblWebhookDeliveries'))
+    CREATE INDEX IX_tblWebhookDeliveries_Webhook
+        ON dbo.tblWebhookDeliveries (WebhookId, Id DESC);
 GO
 
 -- No SQL Server triggers are currently declared.
