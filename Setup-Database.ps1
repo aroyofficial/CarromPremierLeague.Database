@@ -1633,6 +1633,21 @@ CREATE TABLE dbo.tblWebhooks (
 );
 GO
 
+-- Optional credential a subscriber needs on every delivery (Authorization or one custom header). The value is sealed.
+-- Rollback: ALTER TABLE dbo.tblWebhooks DROP CONSTRAINT CK_tblWebhooks_AuthType, DF_tblWebhooks_AuthType;
+--           ALTER TABLE dbo.tblWebhooks DROP COLUMN AuthType, AuthHeaderName, AuthCiphertext, AuthHint;
+IF COL_LENGTH(N'dbo.tblWebhooks', N'AuthType') IS NULL
+    ALTER TABLE dbo.tblWebhooks ADD
+        AuthType VARCHAR(16) NOT NULL CONSTRAINT DF_tblWebhooks_AuthType DEFAULT 'none',
+        AuthHeaderName NVARCHAR(100) NULL,
+        AuthCiphertext NVARCHAR(1024) NULL,
+        AuthHint VARCHAR(24) NULL;
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = N'CK_tblWebhooks_AuthType' AND parent_object_id = OBJECT_ID(N'dbo.tblWebhooks'))
+    ALTER TABLE dbo.tblWebhooks ADD CONSTRAINT CK_tblWebhooks_AuthType CHECK (AuthType IN ('none', 'bearer', 'basic', 'header'));
+GO
+
 IF OBJECT_ID(N'dbo.tblWebhookDeliveries', N'U') IS NULL
 CREATE TABLE dbo.tblWebhookDeliveries (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWebhookDeliveries PRIMARY KEY,
