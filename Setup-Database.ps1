@@ -776,6 +776,16 @@ CREATE TABLE dbo.tblMatches (
 );
 GO
 
+-- Match broadcast lifecycle timestamps: ReadyAt when players are called to the table, CompletedAt when marked Played.
+-- Rollback: ALTER TABLE dbo.tblMatches DROP COLUMN ReadyAt, CompletedAt;
+IF COL_LENGTH(N'dbo.tblMatches', N'ReadyAt') IS NULL
+    ALTER TABLE dbo.tblMatches ADD ReadyAt DATETIME2(6) NULL;
+GO
+
+IF COL_LENGTH(N'dbo.tblMatches', N'CompletedAt') IS NULL
+    ALTER TABLE dbo.tblMatches ADD CompletedAt DATETIME2(6) NULL;
+GO
+
 IF OBJECT_ID(N'dbo.tblMatchStats', N'U') IS NULL
 CREATE TABLE dbo.tblMatchStats (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblMatchStats PRIMARY KEY,
@@ -1701,17 +1711,41 @@ CREATE TABLE dbo.tblWidgetTokens (
     ExpiresAt DATETIME2(6) NULL,
     LastUsedAt DATETIME2(6) NULL,
     RevokedAt DATETIME2(6) NULL,
+    FlowConfigJson NVARCHAR(MAX) NULL,
     CreatedBy BIGINT NOT NULL,
     CONSTRAINT UQ_tblWidgetTokens_TokenHash UNIQUE (TokenHash),
-    CONSTRAINT CK_tblWidgetTokens_Type CHECK (WidgetType IN ('scorecard', 'toss', 'fixtures')),
+    CONSTRAINT CK_tblWidgetTokens_Type CHECK (WidgetType IN ('season_flow', 'scorecard', 'toss', 'fixtures', 'points_table', 'stats')),
     CONSTRAINT CK_tblWidgetTokens_Target CHECK (
-        (WidgetType = 'fixtures' AND SeasonId IS NOT NULL AND MatchId IS NULL)
-        OR (WidgetType <> 'fixtures' AND MatchId IS NOT NULL AND SeasonId IS NULL)
+        (WidgetType IN ('season_flow', 'fixtures', 'points_table', 'stats') AND SeasonId IS NOT NULL AND MatchId IS NULL)
+        OR (WidgetType IN ('scorecard', 'toss') AND MatchId IS NOT NULL AND SeasonId IS NULL)
     ),
     CONSTRAINT FK_tblWidgetTokens_tblMatches FOREIGN KEY (MatchId) REFERENCES dbo.tblMatches(Id) ON DELETE CASCADE,
     CONSTRAINT FK_tblWidgetTokens_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id) ON DELETE CASCADE,
     CONSTRAINT FK_tblWidgetTokens_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
 );
+GO
+
+-- Season broadcast flow JSON and expanded standalone widget types for existing databases.
+-- Rollback: ALTER TABLE dbo.tblWidgetTokens DROP COLUMN FlowConfigJson;
+IF COL_LENGTH(N'dbo.tblWidgetTokens', N'FlowConfigJson') IS NULL
+    ALTER TABLE dbo.tblWidgetTokens ADD FlowConfigJson NVARCHAR(MAX) NULL;
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblWidgetTokens_Type', N'C') IS NOT NULL
+    ALTER TABLE dbo.tblWidgetTokens DROP CONSTRAINT CK_tblWidgetTokens_Type;
+GO
+ALTER TABLE dbo.tblWidgetTokens ADD CONSTRAINT CK_tblWidgetTokens_Type
+    CHECK (WidgetType IN ('season_flow', 'scorecard', 'toss', 'fixtures', 'points_table', 'stats'));
+GO
+
+IF OBJECT_ID(N'dbo.CK_tblWidgetTokens_Target', N'C') IS NOT NULL
+    ALTER TABLE dbo.tblWidgetTokens DROP CONSTRAINT CK_tblWidgetTokens_Target;
+GO
+ALTER TABLE dbo.tblWidgetTokens ADD CONSTRAINT CK_tblWidgetTokens_Target
+    CHECK (
+        (WidgetType IN ('season_flow', 'fixtures', 'points_table', 'stats') AND SeasonId IS NOT NULL AND MatchId IS NULL)
+        OR (WidgetType IN ('scorecard', 'toss') AND MatchId IS NOT NULL AND SeasonId IS NULL)
+    );
 GO
 
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWidgetTokens_Active' AND object_id = OBJECT_ID(N'dbo.tblWidgetTokens'))
