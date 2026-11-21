@@ -984,6 +984,7 @@ USING (VALUES
     ('assistant.use', N'Striker assistant', N'Use Striker', N'Open the Striker chat in this console. Striker still follows every other permission you hold.', 910),
     ('webhooks.manage', N'Webhooks', N'Manage webhooks', N'Create, edit, test and delete outbound webhooks.', 920),
     ('apps.manage', N'Apps and API keys', N'Manage apps', N'Create, rotate and revoke API keys within the permissions you hold.', 930),
+    ('widgets.manage', N'Live widgets', N'Manage live widgets', N'Create, rotate and revoke the private widget links that a streaming app shows on a live stream.', 940),
     ('gallery.create', N'Gallery', N'Add gallery photos', N'Upload a photo or save a public image link as a draft.', 650),
     ('gallery.update', N'Gallery', N'Edit gallery photos', N'Change captions, seasons, order and covers.', 660),
     ('gallery.publish', N'Gallery', N'Publish gallery photos', N'Make a draft photo visible on the public gallery.', 670),
@@ -1109,7 +1110,8 @@ USING (VALUES
     ('permissions', 'administration', N'Permissions', N'Granting and removing permissions.', 'Lock', 90),
     ('assistant', 'administration', N'Striker assistant', N'Who may chat with Striker in this console.', 'ChatDotRound', 95),
     ('webhooks', 'administration', N'Webhooks', N'Outbound HTTP callbacks when league or match events happen.', 'Connection', 96),
-    ('apps', 'administration', N'Apps and API keys', N'API keys for external apps and integrations.', 'Key', 97)
+    ('apps', 'administration', N'Apps and API keys', N'API keys for external apps and integrations.', 'Key', 97),
+    ('widgets', 'matchday', N'Live widgets', N'Private scorecard, toss and fixture widgets for streaming apps.', 'VideoCamera', 65)
 ) AS source (Code, SectionCode, Name, Description, Icon, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.SectionCode <> source.SectionCode OR target.Name <> source.Name OR target.Description <> source.Description OR target.Icon <> source.Icon OR target.SortOrder <> source.SortOrder) THEN
@@ -1150,6 +1152,7 @@ JOIN (VALUES
     ('assistant.use', 'assistant', NULL),
     ('webhooks.manage', 'webhooks', NULL),
     ('apps.manage', 'apps', NULL),
+    ('widgets.manage', 'widgets', NULL),
     ('gallery.create', 'gallery', NULL),
     ('gallery.update', 'gallery', NULL),
     ('gallery.publish', 'gallery', 'gallery.update'),
@@ -1167,7 +1170,7 @@ USING (VALUES
     ('account_manager', N'Account manager', N'Adds admin users and keeps their accounts in order.', 40),
     ('gallery_curator', N'Gallery curator', N'Adds season photos, edits them and publishes the ones that should be public.', 50),
     ('assistant_user', N'Striker user', N'Can chat with Striker in the admin console.', 60),
-    ('integration_manager', N'Integration manager', N'Manages outbound webhooks and external app API keys.', 70)
+    ('integration_manager', N'Integration manager', N'Manages outbound webhooks, external app API keys and live widgets.', 70)
 ) AS source (Code, Name, Description, SortOrder)
     ON target.Code = source.Code
 WHEN MATCHED AND (target.Name <> source.Name OR target.Description <> source.Description OR target.SortOrder <> source.SortOrder) THEN
@@ -1202,7 +1205,8 @@ USING (VALUES
     ('gallery_curator', 'gallery.delete'),
     ('assistant_user', 'assistant.use'),
     ('integration_manager', 'webhooks.manage'),
-    ('integration_manager', 'apps.manage')
+    ('integration_manager', 'apps.manage'),
+    ('integration_manager', 'widgets.manage')
 ) AS source (RoleCode, PermissionCode)
     ON target.RoleCode = source.RoleCode AND target.PermissionCode = source.PermissionCode
 WHEN NOT MATCHED BY TARGET THEN
@@ -1678,6 +1682,41 @@ GO
 IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWebhookDeliveries_Webhook' AND object_id = OBJECT_ID(N'dbo.tblWebhookDeliveries'))
     CREATE INDEX IX_tblWebhookDeliveries_Webhook
         ON dbo.tblWebhookDeliveries (WebhookId, Id DESC);
+GO
+
+-- Private, read-only widget links for streaming apps (Prism Live Studio). Only the hash is stored.
+-- Rollback: DROP TABLE dbo.tblWidgetTokens;
+IF OBJECT_ID(N'dbo.tblWidgetTokens', N'U') IS NULL
+CREATE TABLE dbo.tblWidgetTokens (
+    Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblWidgetTokens PRIMARY KEY,
+    CreatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWidgetTokens_CreatedAt DEFAULT SYSUTCDATETIME(),
+    UpdatedAt DATETIME2(6) NOT NULL CONSTRAINT DF_tblWidgetTokens_UpdatedAt DEFAULT SYSUTCDATETIME(),
+    Name NVARCHAR(120) NOT NULL,
+    WidgetType VARCHAR(24) NOT NULL,
+    MatchId BIGINT NULL,
+    SeasonId BIGINT NULL,
+    TokenPrefix VARCHAR(24) NOT NULL,
+    TokenHash CHAR(64) NOT NULL,
+    IsActive BIT NOT NULL CONSTRAINT DF_tblWidgetTokens_IsActive DEFAULT 1,
+    ExpiresAt DATETIME2(6) NULL,
+    LastUsedAt DATETIME2(6) NULL,
+    RevokedAt DATETIME2(6) NULL,
+    CreatedBy BIGINT NOT NULL,
+    CONSTRAINT UQ_tblWidgetTokens_TokenHash UNIQUE (TokenHash),
+    CONSTRAINT CK_tblWidgetTokens_Type CHECK (WidgetType IN ('scorecard', 'toss', 'fixtures')),
+    CONSTRAINT CK_tblWidgetTokens_Target CHECK (
+        (WidgetType = 'fixtures' AND SeasonId IS NOT NULL AND MatchId IS NULL)
+        OR (WidgetType <> 'fixtures' AND MatchId IS NOT NULL AND SeasonId IS NULL)
+    ),
+    CONSTRAINT FK_tblWidgetTokens_tblMatches FOREIGN KEY (MatchId) REFERENCES dbo.tblMatches(Id) ON DELETE CASCADE,
+    CONSTRAINT FK_tblWidgetTokens_tblSeasons FOREIGN KEY (SeasonId) REFERENCES dbo.tblSeasons(Id) ON DELETE CASCADE,
+    CONSTRAINT FK_tblWidgetTokens_CreatedBy FOREIGN KEY (CreatedBy) REFERENCES dbo.tblAdmins(Id)
+);
+GO
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = N'IX_tblWidgetTokens_Active' AND object_id = OBJECT_ID(N'dbo.tblWidgetTokens'))
+    CREATE INDEX IX_tblWidgetTokens_Active
+        ON dbo.tblWidgetTokens (IsActive, ExpiresAt);
 GO
 '@)
 $sections.Add("-- No SQL Server triggers are currently declared.")
