@@ -786,6 +786,16 @@ IF COL_LENGTH(N'dbo.tblMatches', N'CompletedAt') IS NULL
     ALTER TABLE dbo.tblMatches ADD CompletedAt DATETIME2(6) NULL;
 GO
 
+-- ConcludedAt is set when an operator marks a finished match complete; the stream keeps that match's result on screen until then.
+-- Matches that were already Played when the column is created count as complete, so the stream does not hold old results.
+-- Rollback: ALTER TABLE dbo.tblMatches DROP COLUMN ConcludedAt;
+IF COL_LENGTH(N'dbo.tblMatches', N'ConcludedAt') IS NULL
+BEGIN
+    ALTER TABLE dbo.tblMatches ADD ConcludedAt DATETIME2(6) NULL;
+    EXEC (N'UPDATE dbo.tblMatches SET ConcludedAt = COALESCE(CompletedAt, UpdatedAt, SYSUTCDATETIME()) WHERE Status = 3');
+END
+GO
+
 IF OBJECT_ID(N'dbo.tblMatchStats', N'U') IS NULL
 CREATE TABLE dbo.tblMatchStats (
     Id BIGINT IDENTITY(1,1) NOT NULL CONSTRAINT PK_tblMatchStats PRIMARY KEY,
